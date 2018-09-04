@@ -1,10 +1,10 @@
 #pragma once
-#include <H5Cpp.h>
 #include <vector>
 #include <map>
 #include <string>
 #include <memory>
 #include <carta-protobuf/defs.pb.h>
+#include "FileLoader.h"
 
 struct ChannelStats {
     float minVal;
@@ -35,9 +35,8 @@ private:
     std::vector<float> zProfileCache;
     std::vector<int> zProfileCoords;
     std::vector<std::vector<ChannelStats>> channelStats;
-    H5::H5File file;
-    H5::Group hduGroup;
     std::map<std::string, H5::DataSet> dataSets;
+    FileLoader* loader;
 
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);

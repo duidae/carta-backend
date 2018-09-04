@@ -1,18 +1,18 @@
 #include "Frame.h"
 #include <cmath>
 #include "util.h"
+#include <H5Cpp.h>
 
 using namespace std;
-using namespace H5;
 
 Frame::Frame(const string& uuidString, const string& filename, const string& hdu, int defaultChannel)
     : uuid(uuidString),
       valid(true),
-      filename(filename) {
+      filename(filename),
+      loader(FileLoader::getLoader(filename)) {
     try {
-        file = H5File(filename, H5F_ACC_RDONLY);
-        hduGroup = file.openGroup(hdu);
-        DataSet dataSet = hduGroup.openDataSet("DATA");
+        loader->openFile(filename);
+        H5::DataSet dataSet = loader->loadData("DATA");
         vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
         dataSet.getSpace().getSimpleExtentDims(dims.data(), NULL);
         dimensions = dims.size();
@@ -34,9 +34,9 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         loadStats(false);
 
         // Swizzled data loaded if it exists. Used for Z-profiles and region stats
-        if (H5Lexists(hduGroup.getId(), "SwizzledData", 0)) {
-            if (dimensions == 3 && H5Lexists(hduGroup.getId(), "SwizzledData/ZYX", 0)) {
-                DataSet dataSetSwizzled = hduGroup.openDataSet("SwizzledData/ZYX");
+        if (loader->hasData("SwizzledData")) {
+            if (dimensions == 3 && loader->hasData("SwizzledData/ZYX")) {
+                auto dataSetSwizzled = loader->loadData("SwizzledData/ZYX");
                 vector<hsize_t> swizzledDims(dataSetSwizzled.getSpace().getSimpleExtentNdims(), 0);
                 dataSetSwizzled.getSpace().getSimpleExtentDims(swizzledDims.data(), NULL);
 
@@ -46,8 +46,8 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
                     log(uuid, "Found valid swizzled data set in file {}.", filename);
                     dataSets["swizzled"] = dataSetSwizzled;
                 }
-            } else if (dimensions == 4 && H5Lexists(hduGroup.getId(), "SwizzledData/ZYXW", 0)) {
-                DataSet dataSetSwizzled = hduGroup.openDataSet("SwizzledData/ZYXW");
+            } else if (dimensions == 4 && loader->hasData("SwizzledData/ZYXW")) {
+                auto dataSetSwizzled = loader->loadData("SwizzledData/ZYXW");
                 vector<hsize_t> swizzledDims(dataSetSwizzled.getSpace().getSimpleExtentNdims(), 0);
                 dataSetSwizzled.getSpace().getSimpleExtentDims(swizzledDims.data(), NULL);
                 if (swizzledDims.size() != 4 || swizzledDims[1] != dims[3]) {
@@ -64,7 +64,7 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         }
         valid = setChannels(defaultChannel, 0);
     }
-    catch (FileIException& err) {
+    catch (H5::FileIException& err) {
         log(uuid, "Problem loading file {}", filename);
         valid = false;
     }
@@ -98,11 +98,11 @@ bool Frame::setChannels(int newChannel, int newStokes) {
 
     // Read data into memory space
     hsize_t memDims[] = {height, width};
-    DataSpace memspace(2, memDims);
+    H5::DataSpace memspace(2, memDims);
     channelCache.resize(width * height);
     auto sliceDataSpace = dataSets["main"].getSpace();
     sliceDataSpace.selectHyperslab(H5S_SELECT_SET, count.data(), start.data());
-    dataSets["main"].read(channelCache.data(), PredType::NATIVE_FLOAT, memspace, sliceDataSpace);
+    dataSets["main"].read(channelCache.data(), H5::PredType::NATIVE_FLOAT, memspace, sliceDataSpace);
 
     stokesIndex = newStokes;
     channelIndex = newChannel;
@@ -141,28 +141,27 @@ bool Frame::loadStats(bool loadPercentiles) {
     }
 
     //TODO: Support multiple HDUs
-    if (H5Lexists(hduGroup.getId(), "Statistics", 0) && H5Lexists(hduGroup.getId(), "Statistics/XY", 0)) {
-        auto statsGroup = hduGroup.openGroup("Statistics/XY");
-        if (H5Lexists(statsGroup.getId(), "MAX", 0)) {
-            auto dataSet = statsGroup.openDataSet("MAX");
+    if (loader->hasData("Statistics") && loader->hasData("Statistics/XY")) {
+        if (loader->hasData("Statistics/XY/MAX")) {
+            auto dataSet = loader->loadData("Statistics/XY/MAX");
             auto dataSpace = dataSet.getSpace();
             vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
             dataSpace.getSimpleExtentDims(dims.data(), NULL);
 
             // 2D cubes
             if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].maxVal, PredType::NATIVE_FLOAT);
+                dataSet.read(&channelStats[0][0].maxVal, H5::PredType::NATIVE_FLOAT);
             } // 3D cubes
             else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
                 vector<float> data(depth);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < depth; i++) {
                     channelStats[0][i].maxVal = data[i];
                 }
             } // 4D cubes
             else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
                 vector<float> data(depth * stokes);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         channelStats[i][j].maxVal = data[i * depth + j];
@@ -178,26 +177,26 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (H5Lexists(statsGroup.getId(), "MIN", 0)) {
-            auto dataSet = statsGroup.openDataSet("MIN");
+        if (loader->hasData("Statistics/XY/MIN")) {
+            auto dataSet = loader->loadData("Statistics/XY/MIN");
             auto dataSpace = dataSet.getSpace();
             vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
             dataSpace.getSimpleExtentDims(dims.data(), NULL);
 
             // 2D cubes
             if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].minVal, PredType::NATIVE_FLOAT);
+                dataSet.read(&channelStats[0][0].minVal, H5::PredType::NATIVE_FLOAT);
             } // 3D cubes
             else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
                 vector<float> data(depth);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < depth; i++) {
                     channelStats[0][i].minVal = data[i];
                 }
             } // 4D cubes
             else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
                 vector<float> data(stokes * depth);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         channelStats[i][j].minVal = data[i * depth + j];
@@ -213,26 +212,26 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (H5Lexists(statsGroup.getId(), "MEAN", 0)) {
-            auto dataSet = statsGroup.openDataSet("MEAN");
+        if (loader->hasData("Statistics/XY/MEAN")) {
+            auto dataSet = loader->loadData("Statistics/XY/MEAN");
             auto dataSpace = dataSet.getSpace();
             vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
             dataSpace.getSimpleExtentDims(dims.data(), NULL);
 
             // 2D cubes
             if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].mean, PredType::NATIVE_FLOAT);
+                dataSet.read(&channelStats[0][0].mean, H5::PredType::NATIVE_FLOAT);
             } // 3D cubes
             else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
                 vector<float> data(depth);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < depth; i++) {
                     channelStats[0][i].mean = data[i];
                 }
             } // 4D cubes
             else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
                 vector<float> data(stokes * depth);
-                dataSet.read(data.data(), PredType::NATIVE_FLOAT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         channelStats[i][j].mean = data[i * depth + j];
@@ -247,26 +246,26 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (H5Lexists(statsGroup.getId(), "NAN_COUNT", 0)) {
-            auto dataSet = statsGroup.openDataSet("NAN_COUNT");
+        if (loader->hasData("Statistics/XY/NAN_COUNT")) {
+            auto dataSet = loader->loadData("Statistics/XY/NAN_COUNT");
             auto dataSpace = dataSet.getSpace();
             vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
             dataSpace.getSimpleExtentDims(dims.data(), NULL);
 
             // 2D cubes
             if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].nanCount, PredType::NATIVE_INT64);
+                dataSet.read(&channelStats[0][0].nanCount, H5::PredType::NATIVE_INT64);
             } // 3D cubes
             else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
                 vector<int64_t> data(depth);
-                dataSet.read(data.data(), PredType::NATIVE_INT64);
+                dataSet.read(data.data(), H5::PredType::NATIVE_INT64);
                 for (auto i = 0; i < depth; i++) {
                     channelStats[0][i].nanCount = data[i];
                 }
             } // 4D cubes
             else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
                 vector<int64_t> data(stokes * depth);
-                dataSet.read(data.data(), PredType::NATIVE_INT64);
+                dataSet.read(data.data(), H5::PredType::NATIVE_INT64);
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         channelStats[i][j].nanCount = data[i * depth + j];
@@ -281,8 +280,8 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (H5Lexists(statsGroup.getId(), "HISTOGRAM", 0)) {
-            auto dataSet = statsGroup.openDataSet("HISTOGRAM");
+        if (loader->hasData("Statistics/XY/HISTOGRAM")) {
+            auto dataSet = loader->loadData("Statistics/XY/HISTOGRAM");
             auto dataSpace = dataSet.getSpace();
             vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
             dataSpace.getSimpleExtentDims(dims.data(), NULL);
@@ -291,13 +290,13 @@ bool Frame::loadStats(bool loadPercentiles) {
             if (dimensions == 2) {
                 auto numBins = dims[0];
                 vector<int> data(numBins);
-                dataSet.read(data.data(), PredType::NATIVE_INT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
                 channelStats[0][0].histogramBins = data;
             } // 3D cubes
             else if (dimensions == 3 && dims.size() == 2 && dims[0] == depth) {
                 auto numBins = dims[1];
                 vector<int> data(depth * numBins);
-                dataSet.read(data.data(), PredType::NATIVE_INT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
                 for (auto i = 0; i < depth; i++) {
                     channelStats[0][i].histogramBins.resize(numBins);
                     for (auto j = 0; j < numBins; j++) {
@@ -308,7 +307,7 @@ bool Frame::loadStats(bool loadPercentiles) {
             else if (dimensions == 4 && dims.size() == 3 && dims[0] == stokes && dims[1] == depth) {
                 auto numBins = dims[2];
                 vector<int> data(stokes * depth * numBins);
-                dataSet.read(data.data(), PredType::NATIVE_INT);
+                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         auto& stats = channelStats[i][j];
@@ -329,9 +328,10 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loadPercentiles) {
-            if (H5Lexists(statsGroup.getId(), "PERCENTILES", 0) && H5Lexists(hduGroup.getId(), "PERCENTILE_RANKS", 0)) {
-                auto dataSetPercentiles = statsGroup.openDataSet("PERCENTILES");
-                auto dataSetPercentilesRank = hduGroup.openDataSet("PERCENTILE_RANKS");
+            if (loader->hasData("Statistics/XY/PERCENTILES") &&
+                loader->hasData("PERCENTILE_RANKS")) {
+                auto dataSetPercentiles = loader->loadData("Statistics/XY/PERCENTILES");
+                auto dataSetPercentilesRank = loader->loadData("PERCENTILE_RANKS");
 
                 auto dataSpacePercentiles = dataSetPercentiles.getSpace();
                 vector<hsize_t> dims(dataSpacePercentiles.getSimpleExtentNdims(), 0);
@@ -342,18 +342,18 @@ bool Frame::loadStats(bool loadPercentiles) {
 
                 auto numRanks = dimsRanks[0];
                 vector<float> ranks(numRanks);
-                dataSetPercentilesRank.read(ranks.data(), PredType::NATIVE_FLOAT);
+                dataSetPercentilesRank.read(ranks.data(), H5::PredType::NATIVE_FLOAT);
 
                 if (dimensions == 2 && dims.size() == 1 && dims[0] == numRanks) {
                     vector<float> vals(numRanks);
-                    dataSetPercentiles.read(vals.data(), PredType::NATIVE_FLOAT);
+                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
                     channelStats[0][0].percentiles = vals;
                     channelStats[0][0].percentileRanks = ranks;
                 }
                     // 3D cubes
                 else if (dimensions == 3 && dims.size() == 2 && dims[0] == depth && dims[1] == numRanks) {
                     vector<float> vals(depth * numRanks);
-                    dataSetPercentiles.read(vals.data(), PredType::NATIVE_FLOAT);
+                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
 
                     for (auto i = 0; i < depth; i++) {
                         channelStats[0][i].percentileRanks = ranks;
@@ -366,7 +366,7 @@ bool Frame::loadStats(bool loadPercentiles) {
                     // 4D cubes
                 else if (dimensions == 4 && dims.size() == 3 && dims[0] == stokes && dims[1] == depth && dims[2] == numRanks) {
                     vector<float> vals(stokes * depth * numRanks);
-                    dataSetPercentiles.read(vals.data(), PredType::NATIVE_FLOAT);
+                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
 
                     for (auto i = 0; i < stokes; i++) {
                         for (auto j = 0; j < depth; j++) {
