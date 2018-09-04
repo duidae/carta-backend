@@ -74,7 +74,7 @@ bool Frame::isValid() {
     return valid;
 }
 
-bool Frame::setChannels(int newChannel, int newStokes) {
+bool Frame::setChannels(size_t newChannel, size_t newStokes) {
     if (!valid) {
         log(uuid, "No file loaded");
         return false;

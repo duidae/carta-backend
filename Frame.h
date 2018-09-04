@@ -19,16 +19,16 @@ struct ChannelStats {
 class Frame {
 private:
     bool valid;
-    int channelIndex;
-    int stokesIndex;
+    size_t channelIndex;
+    size_t stokesIndex;
     std::string uuid;
     std::string filename;
     std::string unit;
-    int width;
-    int height;
-    int depth;
-    int stokes;
-    int dimensions;
+    size_t width;
+    size_t height;
+    size_t depth;
+    size_t stokes;
+    size_t dimensions;
     CARTA::ImageBounds bounds;
     int mip;
     std::vector<float> channelCache;
@@ -41,7 +41,7 @@ private:
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);
     bool setBounds(CARTA::ImageBounds imageBounds, int newMip);
-    bool setChannels(int newChannel, int newStokes);
+    bool setChannels(size_t newChannel, size_t newStokes);
     bool loadStats(bool loadPercentiles = false);
     bool isValid();
     int currentStokes();
