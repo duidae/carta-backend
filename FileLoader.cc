@@ -1,7 +1,7 @@
 #include "FileLoader.h"
 #include "HDF5Loader.h"
 
-FileLoader* FileLoader::getLoader(std::string file) {
+FileLoader* FileLoader::getLoader(const std::string &file) {
     casacore::ImageOpener::ImageTypes type = fileType(file);
     switch(type) {
     case casacore::ImageOpener::AIPSPP:

@@ -1,7 +1,6 @@
 #include "Frame.h"
 #include <cmath>
 #include "util.h"
-#include <H5Cpp.h>
 
 using namespace std;
 
@@ -12,49 +11,46 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
       loader(FileLoader::getLoader(filename)) {
     try {
         loader->openFile(filename);
-        H5::DataSet dataSet = loader->loadData("DATA");
-        vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
-        dataSet.getSpace().getSimpleExtentDims(dims.data(), NULL);
-        dimensions = dims.size();
+        auto &dataSet = loader->loadData("DATA");
 
-        if (dimensions < 2 || dimensions > 4) {
+        dimensions = dataSet.shape();
+        size_t ndims = dimensions.size();
+
+        if (ndims < 2 || ndims > 4) {
             log(uuid, "Problem loading file {}: Image must be 2D, 3D or 4D.", filename);
             valid = false;
             return;
         }
 
-        width = dims[dimensions - 1];
-        height = dims[dimensions - 2];
-        depth = (dimensions > 2) ? dims[dimensions - 3] : 1;
-        stokes = (dimensions > 3) ? dims[dimensions - 4] : 1;
+        log(uuid, "Opening image with dimensions: {}", dimensions);
+        // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
+        // sendLogEvent(axesInfo, {"file"}, CARTA::ErrorSeverity::DEBUG);
 
-        dataSets.clear();
-        dataSets["main"] = dataSet;
+        // TBD: use casacore::ImageInterface to get axes
+        width = dimensions[0];
+        height = dimensions[1];
+        depth = (ndims > 2) ? dimensions[2] : 1;
+        stokes = (ndims > 3) ? dimensions[3] : 1;
 
         loadStats(false);
 
         // Swizzled data loaded if it exists. Used for Z-profiles and region stats
         if (loader->hasData("SwizzledData")) {
             if (dimensions == 3 && loader->hasData("SwizzledData/ZYX")) {
-                auto dataSetSwizzled = loader->loadData("SwizzledData/ZYX");
-                vector<hsize_t> swizzledDims(dataSetSwizzled.getSpace().getSimpleExtentNdims(), 0);
-                dataSetSwizzled.getSpace().getSimpleExtentDims(swizzledDims.data(), NULL);
-
-                if (swizzledDims.size() != 3 || swizzledDims[0] != dims[2]) {
+                auto &dataSetSwizzled = loader->loadData("SwizzledData/ZYX");
+                casacore::IPosition swizzledDims = dataSetSwizzled.shape();
+                if (swizzledDims.size() != 3 || swizzledDims[0] != dimensions[2]) {
                     log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
                 } else {
                     log(uuid, "Found valid swizzled data set in file {}.", filename);
-                    dataSets["swizzled"] = dataSetSwizzled;
                 }
             } else if (dimensions == 4 && loader->hasData("SwizzledData/ZYXW")) {
-                auto dataSetSwizzled = loader->loadData("SwizzledData/ZYXW");
-                vector<hsize_t> swizzledDims(dataSetSwizzled.getSpace().getSimpleExtentNdims(), 0);
-                dataSetSwizzled.getSpace().getSimpleExtentDims(swizzledDims.data(), NULL);
-                if (swizzledDims.size() != 4 || swizzledDims[1] != dims[3]) {
+                auto &dataSetSwizzled = loader->loadData("SwizzledData/ZYXW");
+                casacore::IPosition swizzledDims = dataSetSwizzled.shape();
+                if (swizzledDims.size() != 4 || swizzledDims[1] != dimensions[3]) {
                     log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
                 } else {
                     log(uuid, "Found valid swizzled data set in file {}.", filename);
-                    dataSets["swizzled"] = dataSetSwizzled;
                 }
             } else {
                 log(uuid, "File {} missing optional swizzled data set, using fallback calculation.", filename);
@@ -64,7 +60,8 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         }
         valid = setChannels(defaultChannel, 0);
     }
-    catch (H5::FileIException& err) {
+    //TBD: figure out what exceptions need to caught, if any
+    catch (...) {
         log(uuid, "Problem loading file {}", filename);
         valid = false;
     }
@@ -83,26 +80,19 @@ bool Frame::setChannels(size_t newChannel, size_t newStokes) {
         return false;
     }
 
-    // Define dimensions of hyperslab in 2D
-    vector<hsize_t> count = {height, width};
-    vector<hsize_t> start = {0, 0};
-
-    // Append channel (and stokes in 4D) to hyperslab dims
-    if (dimensions == 3) {
-        count.insert(count.begin(), 1);
-        start.insert(start.begin(), newChannel);
-    } else if (dimensions == 4) {
-        count.insert(count.begin(), {1, 1});
-        start.insert(start.begin(), {newStokes, newChannel});
+    casacore::IPosition count(2, width, height);
+    casacore::IPosition start(2, 0, 0);
+    if(dimensions.size() == 3) {
+        count.append(casacore::IPosition(1, 1));
+        start.append(casacore::IPosition(1, newChannel));
+    } else if(dimensions == 4) {
+        count.append(casacore::IPosition(2, 1, 1));
+        start.append(casacore::IPosition(2, newStokes, newChannel));
     }
-
-    // Read data into memory space
-    hsize_t memDims[] = {height, width};
-    H5::DataSpace memspace(2, memDims);
-    channelCache.resize(width * height);
-    auto sliceDataSpace = dataSets["main"].getSpace();
-    sliceDataSpace.selectHyperslab(H5S_SELECT_SET, count.data(), start.data());
-    dataSets["main"].read(channelCache.data(), H5::PredType::NATIVE_FLOAT, memspace, sliceDataSpace);
+    casacore::Slicer section(start, count);
+    casacore::Array<float> tmp;
+    loader->loadData("DATA").getSlice(tmp, section, true);
+    channelCache.reference(tmp);
 
     stokesIndex = newStokes;
     channelIndex = newChannel;
@@ -143,28 +133,32 @@ bool Frame::loadStats(bool loadPercentiles) {
     //TODO: Support multiple HDUs
     if (loader->hasData("Statistics") && loader->hasData("Statistics/XY")) {
         if (loader->hasData("Statistics/XY/MAX")) {
-            auto dataSet = loader->loadData("Statistics/XY/MAX");
-            auto dataSpace = dataSet.getSpace();
-            vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
-            dataSpace.getSimpleExtentDims(dims.data(), NULL);
+            auto &dataSet = loader->loadData("Statistics/XY/MAX");
+            casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
-            if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].maxVal, H5::PredType::NATIVE_FLOAT);
+            if (dimensions.size() == 2 && statDims.size() == 0) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                channelStats[0][0].maxVal = *it;
             } // 3D cubes
-            else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
-                vector<float> data(depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
-                for (auto i = 0; i < depth; i++) {
-                    channelStats[0][i].maxVal = data[i];
+            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                for (auto i = 0; i < depth; ++i) {
+                    channelStats[0][i].maxVal = *it++;
                 }
             } // 4D cubes
-            else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
-                vector<float> data(depth * stokes);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
+            else if (dimensions.size() == 4 && statDims.size() == 2 &&
+                     statDims[0] == stokes && statDims[1] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].maxVal = data[i * depth + j];
+                        channelStats[i][j].maxVal = *it++;
                     }
                 }
             } else {
@@ -178,28 +172,32 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loader->hasData("Statistics/XY/MIN")) {
-            auto dataSet = loader->loadData("Statistics/XY/MIN");
-            auto dataSpace = dataSet.getSpace();
-            vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
-            dataSpace.getSimpleExtentDims(dims.data(), NULL);
+            auto &dataSet = loader->loadData("Statistics/XY/MIN");
+            casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
-            if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].minVal, H5::PredType::NATIVE_FLOAT);
+            if (dimensions.size() == 2 && statDims.size() == 0) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                channelStats[0][0].maxVal = *it;
             } // 3D cubes
-            else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
-                vector<float> data(depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
-                for (auto i = 0; i < depth; i++) {
-                    channelStats[0][i].minVal = data[i];
+            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                for (auto i = 0; i < depth; ++i) {
+                    channelStats[0][i].maxVal = *it++;
                 }
             } // 4D cubes
-            else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
-                vector<float> data(stokes * depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
+            else if (dimensions.size() == 4 && statDims.size() == 2 &&
+                     statDims[0] == stokes && statDims[1] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].minVal = data[i * depth + j];
+                        channelStats[i][j].maxVal = *it++;
                     }
                 }
             } else {
@@ -213,28 +211,32 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loader->hasData("Statistics/XY/MEAN")) {
-            auto dataSet = loader->loadData("Statistics/XY/MEAN");
-            auto dataSpace = dataSet.getSpace();
-            vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
-            dataSpace.getSimpleExtentDims(dims.data(), NULL);
+            auto &dataSet = loader->loadData("Statistics/XY/MEAN");
+            casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
-            if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].mean, H5::PredType::NATIVE_FLOAT);
+            if (dimensions.size() == 2 && statDims.size() == 0) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                channelStats[0][0].maxVal = *it;
             } // 3D cubes
-            else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
-                vector<float> data(depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
-                for (auto i = 0; i < depth; i++) {
-                    channelStats[0][i].mean = data[i];
+            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                for (auto i = 0; i < depth; ++i) {
+                    channelStats[0][i].maxVal = *it++;
                 }
             } // 4D cubes
-            else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
-                vector<float> data(stokes * depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_FLOAT);
+            else if (dimensions.size() == 4 && statDims.size() == 2 &&
+                     statDims[0] == stokes && statDims[1] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].mean = data[i * depth + j];
+                        channelStats[i][j].maxVal = *it++;
                     }
                 }
             } else {
@@ -247,28 +249,32 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loader->hasData("Statistics/XY/NAN_COUNT")) {
-            auto dataSet = loader->loadData("Statistics/XY/NAN_COUNT");
-            auto dataSpace = dataSet.getSpace();
-            vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
-            dataSpace.getSimpleExtentDims(dims.data(), NULL);
+            auto &dataSet = loader->loadData("Statistics/XY/NAN_COUNT");
+            casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
-            if (dimensions == 2 && dims.size() == 0) {
-                dataSet.read(&channelStats[0][0].nanCount, H5::PredType::NATIVE_INT64);
+            if (dimensions.size() == 2 && statDims.size() == 0) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                channelStats[0][0].maxVal = *it;
             } // 3D cubes
-            else if (dimensions == 3 && dims.size() == 1 && dims[0] == depth) {
-                vector<int64_t> data(depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_INT64);
-                for (auto i = 0; i < depth; i++) {
-                    channelStats[0][i].nanCount = data[i];
+            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                for (auto i = 0; i < depth; ++i) {
+                    channelStats[0][i].maxVal = *it++;
                 }
             } // 4D cubes
-            else if (dimensions == 4 && dims.size() == 2 && dims[0] == stokes && dims[1] == depth) {
-                vector<int64_t> data(stokes * depth);
-                dataSet.read(data.data(), H5::PredType::NATIVE_INT64);
+            else if (dimensions.size() == 4 && statDims.size() == 2 &&
+                     statDims[0] == stokes && statDims[1] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].nanCount = data[i * depth + j];
+                        channelStats[i][j].maxVal = *it++;
                     }
                 }
             } else {
@@ -281,39 +287,40 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loader->hasData("Statistics/XY/HISTOGRAM")) {
-            auto dataSet = loader->loadData("Statistics/XY/HISTOGRAM");
-            auto dataSpace = dataSet.getSpace();
-            vector<hsize_t> dims(dataSpace.getSimpleExtentNdims(), 0);
-            dataSpace.getSimpleExtentDims(dims.data(), NULL);
+            auto &dataSet = loader->loadData("Statistics/XY/HISTOGRAM");
+            casacore::IPosition statDims = dataSet.shape();
+            auto numBins = statDims[2];
 
             // 2D cubes
-            if (dimensions == 2) {
-                auto numBins = dims[0];
-                vector<int> data(numBins);
-                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
-                channelStats[0][0].histogramBins = data;
+            if (dimensions.size() == 2 && statDims.size() == 0) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                std::copy(data.begin(), data.end(),
+                          std::back_inserter(channelStats[0][0].histogramBins));
             } // 3D cubes
-            else if (dimensions == 3 && dims.size() == 2 && dims[0] == depth) {
-                auto numBins = dims[1];
-                vector<int> data(depth * numBins);
-                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
-                for (auto i = 0; i < depth; i++) {
+            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
+                for (auto i = 0; i < depth; ++i) {
                     channelStats[0][i].histogramBins.resize(numBins);
                     for (auto j = 0; j < numBins; j++) {
-                        channelStats[0][i].histogramBins[j] = data[i * numBins + j];
+                        channelStats[0][i].histogramBins[j] = *it++;
                     }
                 }
             } // 4D cubes
-            else if (dimensions == 4 && dims.size() == 3 && dims[0] == stokes && dims[1] == depth) {
-                auto numBins = dims[2];
-                vector<int> data(stokes * depth * numBins);
-                dataSet.read(data.data(), H5::PredType::NATIVE_INT);
+            else if (dimensions.size() == 4 && statDims.size() == 2 &&
+                     statDims[0] == stokes && statDims[1] == depth) {
+                casacore::Array<float> data;
+                dataSet.get(data, true);
+                auto it = data.begin();
                 for (auto i = 0; i < stokes; i++) {
                     for (auto j = 0; j < depth; j++) {
                         auto& stats = channelStats[i][j];
                         stats.histogramBins.resize(numBins);
                         for (auto k = 0; k < numBins; k++) {
-                            stats.histogramBins[k] = data[(i * depth + j) * numBins + k];
+                            stats.histogramBins[k] = *it++;
                         }
                     }
                 }
@@ -330,52 +337,48 @@ bool Frame::loadStats(bool loadPercentiles) {
         if (loadPercentiles) {
             if (loader->hasData("Statistics/XY/PERCENTILES") &&
                 loader->hasData("PERCENTILE_RANKS")) {
-                auto dataSetPercentiles = loader->loadData("Statistics/XY/PERCENTILES");
-                auto dataSetPercentilesRank = loader->loadData("PERCENTILE_RANKS");
+                auto &dataSetPercentiles = loader->loadData("Statistics/XY/PERCENTILES");
+                auto &dataSetPercentilesRank = loader->loadData("PERCENTILE_RANKS");
 
-                auto dataSpacePercentiles = dataSetPercentiles.getSpace();
-                vector<hsize_t> dims(dataSpacePercentiles.getSimpleExtentNdims(), 0);
-                dataSpacePercentiles.getSimpleExtentDims(dims.data(), NULL);
-                auto dataSpaceRank = dataSetPercentilesRank.getSpace();
-                vector<hsize_t> dimsRanks(dataSpaceRank.getSimpleExtentNdims(), 0);
-                dataSpaceRank.getSimpleExtentDims(dimsRanks.data(), NULL);
+                casacore::IPosition dims = dataSetPercentiles.shape();
+                casacore::IPosition dimsRanks = dataSetPercentilesRank.shape();
 
                 auto numRanks = dimsRanks[0];
-                vector<float> ranks(numRanks);
-                dataSetPercentilesRank.read(ranks.data(), H5::PredType::NATIVE_FLOAT);
+                casacore::Vector<float> ranks(numRanks);
+                dataSetPercentilesRank.get(ranks, false);
 
                 if (dimensions == 2 && dims.size() == 1 && dims[0] == numRanks) {
-                    vector<float> vals(numRanks);
-                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
-                    channelStats[0][0].percentiles = vals;
-                    channelStats[0][0].percentileRanks = ranks;
+                    casacore::Vector<float> vals(numRanks);
+                    dataSetPercentiles.get(vals, true);
+                    vals.tovector(channelStats[0][0].percentiles);
+                    ranks.tovector(channelStats[0][0].percentileRanks);
                 }
                     // 3D cubes
                 else if (dimensions == 3 && dims.size() == 2 && dims[0] == depth && dims[1] == numRanks) {
-                    vector<float> vals(depth * numRanks);
-                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
+                    casacore::Matrix<float> vals(depth, numRanks);
+                    dataSetPercentiles.get(vals, false);
 
                     for (auto i = 0; i < depth; i++) {
-                        channelStats[0][i].percentileRanks = ranks;
+                        ranks.tovector(channelStats[0][i].percentileRanks);
                         channelStats[0][i].percentiles.resize(numRanks);
                         for (auto j = 0; j < numRanks; j++) {
-                            channelStats[0][i].percentiles[j] = vals[i * numRanks + j];
+                            channelStats[0][i].percentiles[j] = vals(i,j);
                         }
                     }
                 }
                     // 4D cubes
                 else if (dimensions == 4 && dims.size() == 3 && dims[0] == stokes && dims[1] == depth && dims[2] == numRanks) {
-                    vector<float> vals(stokes * depth * numRanks);
-                    dataSetPercentiles.read(vals.data(), H5::PredType::NATIVE_FLOAT);
+                    casacore::Cube<float> vals(stokes, depth, numRanks);
+                    dataSetPercentiles.get(vals, false);
 
                     for (auto i = 0; i < stokes; i++) {
                         for (auto j = 0; j < depth; j++) {
                             auto& stats = channelStats[i][j];
                             stats.percentiles.resize(numRanks);
                             for (auto k = 0; k < numRanks; k++) {
-                                stats.percentiles[k] = vals[(i * depth + j) * numRanks + k];
+                                stats.percentiles[k] = vals(i,j,k);
                             }
-                            stats.percentileRanks = ranks;
+                            ranks.tovector(stats.percentileRanks);
                         }
                     }
                 } else {
@@ -424,7 +427,7 @@ vector<float> Frame::getImageData(bool meanFilter) {
                     for (auto pixelY = 0; pixelY < mip; pixelY++) {
                         auto imageRow = y + j * mip + pixelY;
                         auto imageCol = x + i * mip + pixelX;
-                        float pixVal = channelCache[imageRow * width + imageCol];
+                        float pixVal = channelCache(imageCol, imageRow);
                         if (!isnan(pixVal)) {
                             pixelCount++;
                             pixelSum += pixVal;
@@ -440,7 +443,7 @@ vector<float> Frame::getImageData(bool meanFilter) {
             for (auto i = 0; i < rowLengthRegion; i++) {
                 auto imageRow = y + j * mip;
                 auto imageCol = x + i * mip;
-                regionData[j * rowLengthRegion + i] = channelCache[imageRow * width + imageCol];
+                regionData[j * rowLengthRegion + i] = channelCache(imageCol, imageRow);
             }
         }
     }
@@ -453,16 +456,18 @@ CARTA::Histogram Frame::currentHistogram() {
 
     // Calculate histogram if it hasn't been stored
     if (channelStats[stokesIndex][channelIndex].histogramBins.empty()) {
-        float minVal = channelCache[0];
-        float maxVal = channelCache[0];
+        float minVal = channelCache(0,0);
+        float maxVal = channelCache(0,0);
         float sum = 0.0f;
         int count = 0;
-        for (auto i = 0; i < width * height; i++) {
-            auto v = channelCache[i];
-            minVal = fmin(minVal, v);
-            maxVal = fmax(maxVal, v);
-            sum += isnan(v) ? 0.0 : v;
-            count += isnan(v) ? 0 : 1;
+        for (auto i = 0; i < height; i++) {
+            for (auto j = 0; j < width; ++j) {
+                auto v = channelCache(j, i);
+                minVal = fmin(minVal, v);
+                maxVal = fmax(maxVal, v);
+                sum += isnan(v) ? 0.0 : v;
+                count += isnan(v) ? 0 : 1;
+            }
         }
 
         ChannelStats& stats = channelStats[stokesIndex][channelIndex];
@@ -474,13 +479,15 @@ CARTA::Histogram Frame::currentHistogram() {
         stats.histogramBins.resize(N, 0);
         float binWidth = (stats.maxVal - stats.minVal) / N;
 
-        for (auto i = 0; i < width * height; i++) {
-            auto v = channelCache[i];
-            if (isnan(v)) {
-                continue;
+        for (auto i = 0; i < height; i++) {
+            for (auto j = 0; j < width; ++j) {
+                auto v = channelCache(j,i);
+                if (isnan(v)) {
+                    continue;
+                }
+                int bin = max(min((int) ((v - minVal) / binWidth), N - 1), 0);
+                stats.histogramBins[bin]++;
             }
-            int bin = max(min((int) ((v - minVal) / binWidth), N - 1), 0);
-            stats.histogramBins[bin]++;
         }
     }
 

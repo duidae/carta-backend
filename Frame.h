@@ -5,6 +5,7 @@
 #include <memory>
 #include <carta-protobuf/defs.pb.h>
 #include "FileLoader.h"
+#include <casacore/images/Images/ImageInterface.h>
 
 struct ChannelStats {
     float minVal;
@@ -28,15 +29,15 @@ private:
     size_t height;
     size_t depth;
     size_t stokes;
-    size_t dimensions;
+    casacore::IPosition dimensions;
     CARTA::ImageBounds bounds;
     int mip;
-    std::vector<float> channelCache;
+    casacore::Matrix<float> channelCache;
     std::vector<float> zProfileCache;
     std::vector<int> zProfileCoords;
     std::vector<std::vector<ChannelStats>> channelStats;
-    std::map<std::string, H5::DataSet> dataSets;
-    FileLoader* loader;
+    std::unique_ptr<FileLoader> loader;
+    std::unique_ptr<casacore::ImageInterface<float>> image;
 
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);
