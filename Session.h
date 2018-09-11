@@ -4,12 +4,13 @@
 #include <boost/multi_array.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <H5Cpp.h>
-#include <H5File.h>
 #include <mutex>
 #include <cstdio>
 #include <uWS/uWS.h>
 #include <cstdint>
+#include <casacore/casa/aips.h>
+#include <casacore/casa/OS/File.h>
+
 #include <carta-protobuf/register_viewer.pb.h>
 #include <carta-protobuf/file_list.pb.h>
 #include <carta-protobuf/file_info.pb.h>
@@ -17,12 +18,11 @@
 #include <carta-protobuf/set_image_view.pb.h>
 #include <carta-protobuf/set_image_channels.pb.h>
 #include <carta-protobuf/close_file.pb.h>
-#include <boost/filesystem.hpp>
 #include <carta-protobuf/region_histogram.pb.h>
 
 #include "compression.h"
-#include "Frame.h"
 #include "ctpl.h"
+#include "Frame.h"
 
 #define MAX_SUBSETS 8
 
@@ -77,12 +77,25 @@ public:
     ~Session();
 
 protected:
+
+    // File list response
     CARTA::FileListResponse getFileList(std::string folder);
-    bool fillFileInfo(CARTA::FileInfo* fileInfo, boost::filesystem::path& path, std::string& message);
-    bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo, const std::string folder, const std::string filename, std::string hdu, std::string& message);
     bool checkPermissionForDirectory(std:: string prefix);
     bool checkPermissionForEntry(std::string entry);
+
+    // FileInfo
+    bool fillFileInfo(CARTA::FileInfo* fileInfo, casacore::File& ccfile);
+    CARTA::FileType getFileType(int casacoreImType);
+    bool getHduList(CARTA::FileInfo* fileInfo, casacore::String filename);
+
+    // FileInfoExtended
+    bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo,
+        const std::string folder, const std::string filename, std::string hdu, std::string& message);
+
+    // Send data
     void sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
+
+    // Send protobuf message
     void sendEvent(std::string eventName, u_int64_t eventId, google::protobuf::MessageLite& message);
     void sendLogEvent(std::string message, std::vector<std::string> tags, CARTA::ErrorSeverity severity);
 };

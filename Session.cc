@@ -1,12 +1,17 @@
 #include "Session.h"
+#include "FileExtInfoLoader.h"
+
 #include <carta-protobuf/raster_image.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/error.pb.h>
 
-using namespace H5;
+#include <casacore/casa/OS/Path.h>
+#include <casacore/casa/OS/DirectoryIterator.h>
+#include <casacore/images/Images/ImageOpener.h>
+#include <casacore/images/Images/FITSImgParser.h>
+
 using namespace std;
 using namespace CARTA;
-namespace fs = boost::filesystem;
 
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
 Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, ctpl::thread_pool& serverThreadPool, bool verbose)
@@ -76,175 +81,138 @@ bool Session::checkPermissionForDirectory(std::string prefix) {
 }
 
 FileListResponse Session::getFileList(string folder) {
-    string fullPath = baseFolder;
-    // constructs the full path based on the base folder and the folder string (unless folder is empty or root)
-    if (folder.length() && folder != "/") {
-        fullPath = fmt::format("{}/{}", baseFolder, folder);
-    }
-    fs::path folderPath(fullPath);
+    // fill FileListResponse
+    casacore::Path fullPath(baseFolder);
     FileListResponse fileList;
     if (folder.length() && folder != "/") {
+        fullPath.append(folder);
         fileList.set_directory(folder);
-        auto lastSlashPosition = folder.find_last_of('/');
-        if (lastSlashPosition != string::npos) {
-            fileList.set_parent(folder.substr(0, lastSlashPosition));
-        } else {
-            fileList.set_parent("/");
-        }
+        fileList.set_parent(fullPath.dirName());
     }
 
+    casacore::File folderPath(fullPath);
     string message;
 
     try {
-        if (checkPermissionForDirectory(folder) && fs::exists(folderPath) && fs::is_directory(folderPath)) {
-            for (auto& directoryEntry : fs::directory_iterator(folderPath)) {
-                fs::path filePath(directoryEntry);
-                string filenameString = directoryEntry.path().filename().string();
-                // Check if it is a directory and the user has permission to access it
-                string pathNameRelative = (folder.length() && folder != "/") ? folder + "/" + filenameString : filenameString;
-                if (fs::is_directory(filePath) && checkPermissionForDirectory(pathNameRelative)) {
-                    fileList.add_subdirectories(filenameString);
-                }
-                    // Check if it is an HDF5 file
-                else if (fs::is_regular_file(filePath) && H5File::isHdf5(filePath.string())) {
-                    auto fileInfo = fileList.add_files();
-                    if (!fillFileInfo(fileInfo, filePath, message)) {
-                        fileList.set_success(false);
-                        fileList.set_message(message);
-                        return fileList;
+        if (checkPermissionForDirectory(folder) && folderPath.exists() && folderPath.isDirectory()) {
+            casacore::Directory startDir(fullPath);
+            casacore::DirectoryIterator dirIter(startDir);
+            while (!dirIter.pastEnd()) {
+                casacore::File ccfile(dirIter.file());  // casacore File
+                casacore::String fullpath(ccfile.path().absoluteName());
+                casacore::ImageOpener::ImageTypes imType = casacore::ImageOpener::imageType(fullpath);
+                bool addImage(false);
+                if (ccfile.isDirectory()) {
+                    if ((imType==casacore::ImageOpener::AIPSPP) || (imType==casacore::ImageOpener::MIRIAD))
+                        addImage = true;
+                    else if (imType==casacore::ImageOpener::UNKNOWN) {
+                        // Check if it is a directory and the user has permission to access it
+                        casacore::String dirname(ccfile.path().baseName());
+                        string pathNameRelative = (folder.length() && folder != "/") ? folder.append("/" + dirname) : dirname;
+                        if (checkPermissionForDirectory(pathNameRelative))
+                           fileList.add_subdirectories(dirname);
                     }
+                } else if (ccfile.isRegular() &&
+                    ((imType==casacore::ImageOpener::FITS) || (imType==casacore::ImageOpener::HDF5))) {
+                        addImage = true;
                 }
+
+                if (addImage) { // add image to file list
+                    auto fileInfo = fileList.add_files();
+                    fillFileInfo(fileInfo, ccfile);
+                }
+                dirIter++;
             }
+        } else {
+            fileList.set_success(false);
+            fileList.set_message("Cannot read directory; check name and permissions.");
+            return fileList;
         }
-    }
-    catch (const fs::filesystem_error& ex) {
-        fmt::print("Error: {}\n", ex.what());
-        sendLogEvent(ex.what(), {"file-list"}, CARTA::ErrorSeverity::ERROR);
+    } catch (casacore::AipsError& err) {
+        fmt::print("Error: {}\n", err.getMesg().c_str());
+        sendLogEvent(err.getMesg(), {"file-list"}, CARTA::ErrorSeverity::ERROR);
         fileList.set_success(false);
-        fileList.set_message(ex.what());
+        fileList.set_message(err.getMesg());
         return fileList;
     }
-
     fileList.set_success(true);
     return fileList;
 }
 
-bool Session::fillFileInfo(FileInfo* fileInfo, fs::path& path, string& message) {
-    string filenameString = path.filename().string();
-    fileInfo->set_size(fs::file_size(path));
-    fileInfo->set_name(filenameString);
-    fileInfo->set_type(FileType::HDF5);
-    H5File file(path.string(), H5F_ACC_RDONLY);
-    auto N = file.getNumObjs();
-    for (auto i = 0; i < N; i++) {
-        if (file.getObjTypeByIdx(i) == H5G_GROUP) {
-            string groupName = file.getObjnameByIdx(i);
+bool Session::fillFileInfo(FileInfo* fileInfo, casacore::File& ccfile) {
+    // fill FileInfo submessage
+    bool fileInfoOK(true);
+    fileInfo->set_size(ccfile.size());
+    fileInfo->set_name(ccfile.path().baseName());
+    casacore::String absFileName(ccfile.path().absoluteName());
+    casacore::ImageOpener::ImageTypes imType = casacore::ImageOpener::imageType(absFileName);
+    fileInfo->set_type(getFileType(imType));
+    fileInfoOK = getHduList(fileInfo, absFileName);
+    return fileInfoOK;
+}
+
+CARTA::FileType Session::getFileType(int imageType) {
+    // convert casacore ImageType to protobuf FileType
+    switch (imageType) {
+        case casacore::ImageOpener::FITS:
+            return FileType::FITS;
+        case casacore::ImageOpener::AIPSPP:
+            return FileType::CASA;
+        case casacore::ImageOpener::HDF5:
+            return FileType::HDF5;
+        case casacore::ImageOpener::MIRIAD:
+            return FileType::MIRIAD;
+        default:
+            return FileType::UNKNOWN;
+    }
+}
+
+bool Session::getHduList(FileInfo* fileInfo, casacore::String filename) {
+    // fill FileInfo hdu list
+    bool hduOK(true);
+    if (fileInfo->type()==CARTA::HDF5) {
+        casacore::HDF5File hdfFile(filename);
+        std::vector<casacore::String> hdus(casacore::HDF5Group::linkNames(hdfFile));
+        for (auto groupName : hdus)
             fileInfo->add_hdu_list(groupName);
+        hduOK = (fileInfo->hdu_list_size() > 0);
+    } else if (fileInfo->type()==CARTA::FITS) {
+        casacore::FITSImgParser fitsParser(filename.c_str());
+        int numHdu(fitsParser.get_numhdu());
+        for (int hdu=0; hdu<numHdu; ++hdu) {
+            fileInfo->add_hdu_list(casacore::String::toString(hdu+1));
         }
-    }
-    return fileInfo->hdu_list_size() > 0;
-}
-
-bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fileInfo, const string folder, const string filename, string hdu, string& message) {
-    string pathString;
-    // constructs the full path based on the base folder, the folder string and the filename
-    if (folder.length()) {
-        pathString = fmt::format("{}/{}/{}", baseFolder, folder, filename);
+        hduOK = (fileInfo->hdu_list_size() > 0);
     } else {
-        pathString = fmt::format("{}/{}", baseFolder, filename);
+        fileInfo->add_hdu_list("");
     }
-
-    fs::path filePath(pathString);
-
-    try {
-        if (fs::is_regular_file(filePath) && H5File::isHdf5(filePath.string())) {
-            if (!fillFileInfo(fileInfo, filePath, message)) {
-                return false;
-            }
-
-            // Add extended info
-            H5File file(filePath.string(), H5F_ACC_RDONLY);
-            bool hasHDU;
-            if (hdu.length()) {
-                hasHDU = H5Lexists(file.getId(), hdu.c_str(), 0);
-            } else {
-                auto N = file.getNumObjs();
-                hasHDU = false;
-                for (auto i = 0; i < N; i++) {
-                    if (file.getObjTypeByIdx(i) == H5G_GROUP) {
-                        hdu = file.getObjnameByIdx(i);
-                        hasHDU = true;
-                        break;
-                    }
-                }
-            }
-
-            if (hasHDU) {
-                H5::Group topLevelGroup = file.openGroup(hdu);
-                if (H5Lexists(topLevelGroup.getId(), "DATA", 0)) {
-                    DataSet dataSet = topLevelGroup.openDataSet("DATA");
-                    vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
-                    dataSet.getSpace().getSimpleExtentDims(dims.data(), NULL);
-                    uint32_t N = dims.size();
-                    extendedInfo->set_dimensions(N);
-                    if (N < 2 || N > 4) {
-                        message = "Image must be 2D, 3D or 4D.";
-                        return false;
-                    }
-                    extendedInfo->set_width(dims[N - 1]);
-                    extendedInfo->set_height(dims[N - 2]);
-                    extendedInfo->set_depth((N > 2) ? dims[N - 3] : 1);
-                    extendedInfo->set_stokes((N > 3) ? dims[N - 4] : 1);
-
-                    H5O_info_t groupInfo;
-                    H5Oget_info(topLevelGroup.getId(), &groupInfo);
-                    for (auto i = 0; i < groupInfo.num_attrs; i++) {
-                        Attribute attr = topLevelGroup.openAttribute(i);
-                        hid_t attrTypeId = H5Aget_type(attr.getId());
-                        auto headerEntry = extendedInfo->add_header_entries();
-                        headerEntry->set_name(attr.getName());
-
-                        auto typeClass = H5Tget_class(attrTypeId);
-                        if (typeClass == H5T_STRING) {
-                            attr.read(attr.getStrType(), *headerEntry->mutable_value());
-                            headerEntry->set_entry_type(EntryType::STRING);
-                        } else if (typeClass == H5T_INTEGER) {
-                            int64_t valueInt;
-                            DataType intType(PredType::NATIVE_INT64);
-                            attr.read(intType, &valueInt);
-                            *headerEntry->mutable_value() = fmt::format("{}", valueInt);
-                            headerEntry->set_numeric_value(valueInt);
-                            headerEntry->set_entry_type(EntryType::INT);
-                        } else if (typeClass == H5T_FLOAT) {
-                            DataType doubleType(PredType::NATIVE_DOUBLE);
-                            double numericValue = 0;
-                            attr.read(doubleType, &numericValue);
-                            headerEntry->set_numeric_value(numericValue);
-                            headerEntry->set_entry_type(EntryType::FLOAT);
-                            *headerEntry->mutable_value() = fmt::format("{:f}", numericValue);
-                        }
-                    }
-                } else {
-                    message = "File is missing DATA dataset";
-                    return false;
-                }
-            } else {
-                message = "File is missing top-level group";
-                return false;
-            }
-        } else {
-            message = "File is not a valid HDF5 file";
-            return false;
-        }
-    }
-    catch (const fs::filesystem_error& ex) {
-        message = ex.what();
-        return false;
-    }
-    return true;
+    return hduOK;
 }
 
+bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fileInfo, 
+        const string folder, const string filename, string hdu, string& message) {
+    // fill FileInfoResponse submessages FileInfo and FileInfoExtended
+    bool extFileInfoOK(true);
+    casacore::Path ccpath(folder);
+    ccpath.append(filename);
+    casacore::File ccfile(ccpath);
+    try {
+        if (!fillFileInfo(fileInfo, ccfile)) {
+             return false;
+        }
+        casacore::String fullname(ccfile.path().absoluteName());
+        FileExtInfoLoader extLoader(fullname, hdu);
+        extFileInfoOK = extLoader.fillFileExtInfo(extendedInfo, message);
+    } catch (casacore::AipsError& ex) {
+        message = ex.getMesg();
+        extFileInfoOK = false;
+    }
+    return extFileInfoOK;
+}
+
+// *********************************************************************************
 // CARTA ICD implementation
+
 void Session::onRegisterViewer(const RegisterViewer& message, uint32_t requestId) {
     apiKey = message.api_key();
     RegisterViewerAck ackMessage;
