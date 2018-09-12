@@ -36,7 +36,7 @@ private:
     std::vector<float> zProfileCache;
     std::vector<int> zProfileCoords;
     std::vector<std::vector<ChannelStats>> channelStats;
-    std::unique_ptr<FileLoader> loader;
+    std::unique_ptr<carta::FileLoader> loader;
     std::unique_ptr<casacore::ImageInterface<float>> image;
 
 public:

@@ -2,6 +2,7 @@
 #include <cmath>
 #include "util.h"
 
+using namespace carta;
 using namespace std;
 
 Frame::Frame(const string& uuidString, const string& filename, const string& hdu, int defaultChannel)
@@ -16,7 +17,7 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
             return;
         }
         loader->openFile(filename);
-        auto &dataSet = loader->loadData("DATA");
+        auto &dataSet = loader->loadData(FileInfo::Data::XYZW);
 
         dimensions = dataSet.shape();
         size_t ndims = dimensions.size();
@@ -40,25 +41,21 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         loadStats(false);
 
         // Swizzled data loaded if it exists. Used for Z-profiles and region stats
-        if (loader->hasData("SwizzledData")) {
-            if (dimensions == 3 && loader->hasData("SwizzledData/ZYX")) {
-                auto &dataSetSwizzled = loader->loadData("SwizzledData/ZYX");
-                casacore::IPosition swizzledDims = dataSetSwizzled.shape();
-                if (swizzledDims.size() != 3 || swizzledDims[0] != dimensions[2]) {
-                    log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
-                } else {
-                    log(uuid, "Found valid swizzled data set in file {}.", filename);
-                }
-            } else if (dimensions == 4 && loader->hasData("SwizzledData/ZYXW")) {
-                auto &dataSetSwizzled = loader->loadData("SwizzledData/ZYXW");
-                casacore::IPosition swizzledDims = dataSetSwizzled.shape();
-                if (swizzledDims.size() != 4 || swizzledDims[1] != dimensions[3]) {
-                    log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
-                } else {
-                    log(uuid, "Found valid swizzled data set in file {}.", filename);
-                }
+        if (dimensions == 3 && loader->hasData(FileInfo::Data::ZYX)) {
+            auto &dataSetSwizzled = loader->loadData(FileInfo::Data::ZYX);
+            casacore::IPosition swizzledDims = dataSetSwizzled.shape();
+            if (swizzledDims.size() != 3 || swizzledDims[0] != dimensions[2]) {
+                log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
             } else {
-                log(uuid, "File {} missing optional swizzled data set, using fallback calculation.", filename);
+                log(uuid, "Found valid swizzled data set in file {}.", filename);
+            }
+        } else if (dimensions == 4 && loader->hasData(FileInfo::Data::ZYXW)) {
+            auto &dataSetSwizzled = loader->loadData(FileInfo::Data::ZYXW);
+            casacore::IPosition swizzledDims = dataSetSwizzled.shape();
+            if (swizzledDims.size() != 4 || swizzledDims[1] != dimensions[3]) {
+                log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
+            } else {
+                log(uuid, "Found valid swizzled data set in file {}.", filename);
             }
         } else {
             log(uuid, "File {} missing optional swizzled data set, using fallback calculation.", filename);
@@ -96,7 +93,7 @@ bool Frame::setChannels(size_t newChannel, size_t newStokes) {
     }
     casacore::Slicer section(start, count);
     casacore::Array<float> tmp;
-    loader->loadData("DATA").getSlice(tmp, section, true);
+    loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, section, true);
     channelCache.reference(tmp);
 
     stokesIndex = newStokes;
@@ -136,9 +133,9 @@ bool Frame::loadStats(bool loadPercentiles) {
     }
 
     //TODO: Support multiple HDUs
-    if (loader->hasData("Statistics") && loader->hasData("Statistics/XY")) {
-        if (loader->hasData("Statistics/XY/MAX")) {
-            auto &dataSet = loader->loadData("Statistics/XY/MAX");
+    if (loader->hasData(FileInfo::Data::Stats) && loader->hasData(FileInfo::Data::Stats2D)) {
+        if (loader->hasData(FileInfo::Data::S2DMax)) {
+            auto &dataSet = loader->loadData(FileInfo::Data::S2DMax);
             casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
@@ -176,8 +173,8 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (loader->hasData("Statistics/XY/MIN")) {
-            auto &dataSet = loader->loadData("Statistics/XY/MIN");
+        if (loader->hasData(FileInfo::Data::S2DMin)) {
+            auto &dataSet = loader->loadData(FileInfo::Data::S2DMin);
             casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
@@ -215,8 +212,8 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (loader->hasData("Statistics/XY/MEAN")) {
-            auto &dataSet = loader->loadData("Statistics/XY/MEAN");
+        if (loader->hasData(FileInfo::Data::S2DMean)) {
+            auto &dataSet = loader->loadData(FileInfo::Data::S2DMean);
             casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
@@ -253,8 +250,8 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (loader->hasData("Statistics/XY/NAN_COUNT")) {
-            auto &dataSet = loader->loadData("Statistics/XY/NAN_COUNT");
+        if (loader->hasData(FileInfo::Data::S2DNans)) {
+            auto &dataSet = loader->loadData(FileInfo::Data::S2DNans);
             casacore::IPosition statDims = dataSet.shape();
 
             // 2D cubes
@@ -291,8 +288,8 @@ bool Frame::loadStats(bool loadPercentiles) {
             return false;
         }
 
-        if (loader->hasData("Statistics/XY/HISTOGRAM")) {
-            auto &dataSet = loader->loadData("Statistics/XY/HISTOGRAM");
+        if (loader->hasData(FileInfo::Data::S2DHist)) {
+            auto &dataSet = loader->loadData(FileInfo::Data::S2DHist);
             casacore::IPosition statDims = dataSet.shape();
             auto numBins = statDims[2];
 
@@ -340,10 +337,10 @@ bool Frame::loadStats(bool loadPercentiles) {
         }
 
         if (loadPercentiles) {
-            if (loader->hasData("Statistics/XY/PERCENTILES") &&
-                loader->hasData("PERCENTILE_RANKS")) {
-                auto &dataSetPercentiles = loader->loadData("Statistics/XY/PERCENTILES");
-                auto &dataSetPercentilesRank = loader->loadData("PERCENTILE_RANKS");
+            if (loader->hasData(FileInfo::Data::S2DPercent) &&
+                loader->hasData(FileInfo::Data::Ranks)) {
+                auto &dataSetPercentiles = loader->loadData(FileInfo::Data::S2DPercent);
+                auto &dataSetPercentilesRank = loader->loadData(FileInfo::Data::Ranks);
 
                 casacore::IPosition dims = dataSetPercentiles.shape();
                 casacore::IPosition dimsRanks = dataSetPercentilesRank.shape();
