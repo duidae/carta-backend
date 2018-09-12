@@ -10,6 +10,11 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
       filename(filename),
       loader(FileLoader::getLoader(filename)) {
     try {
+        if (loader==nullptr) {
+            log(uuid, "Problem loading file {}: loader not implemented", filename);
+            valid = false;
+            return;
+        }
         loader->openFile(filename);
         auto &dataSet = loader->loadData("DATA");
 

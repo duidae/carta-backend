@@ -193,7 +193,8 @@ bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fil
         const string folder, const string filename, string hdu, string& message) {
     // fill FileInfoResponse submessages FileInfo and FileInfoExtended
     bool extFileInfoOK(true);
-    casacore::Path ccpath(folder);
+    casacore::Path ccpath(baseFolder);
+    ccpath.append(folder);
     ccpath.append(filename);
     casacore::File ccfile(ccpath);
     try {
@@ -223,8 +224,12 @@ void Session::onRegisterViewer(const RegisterViewer& message, uint32_t requestId
 
 void Session::onFileListRequest(const FileListRequest& request, uint32_t requestId) {
     string folder = request.directory();
-    if (folder.length() > 1 && folder[0] == '/') {
-        folder = folder.substr(1);
+    // strip baseFolder from folder
+    string basePath(baseFolder);
+    if (basePath.back()=='/') basePath.pop_back();
+    if (folder.find(basePath)==0) {
+        folder.replace(0, basePath.length(), "");
+	if (folder.front()=='/') folder.replace(0,1,""); // remove leading '/'
     }
     FileListResponse response = getFileList(folder);
     sendEvent("FILE_LIST_RESPONSE", requestId, response);
@@ -249,14 +254,11 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
     string errMessage;
     bool infoSuccess = fillExtendedFileInfo(fileInfoExtended, fileInfo, message.directory(), message.file(), message.hdu(), errMessage);
     if (infoSuccess && fileInfo->hdu_list_size()) {
-        string filename;
-        if (message.directory().length() && message.directory() != "/") {
-            filename = fmt::format("{}/{}/{}", baseFolder, message.directory(), message.file());
-        } else {
-            filename = fmt::format("{}/{}", baseFolder, message.file());
-        }
+	casacore::Path path(baseFolder);
+	path.append(message.directory());
+	path.append(message.file());
+        string filename(path.absoluteName());
         string hdu = fileInfo->hdu_list(0);
-
         auto frame = unique_ptr<Frame>(new Frame(boost::uuids::to_string(uuid), filename, hdu));
         if (frame->isValid()) {
             ack.set_success(true);
