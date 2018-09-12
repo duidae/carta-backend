@@ -7,9 +7,9 @@
 
 namespace carta {
 
-class MSLoader : public FileLoader {
+class CasaLoader : public FileLoader {
 public:
-    MSLoader(const std::string &file);
+    CasaLoader(const std::string &file);
     void openFile(const std::string &file) override;
     bool hasData(FileInfo::Data ds) const override;
     image_ref loadData(FileInfo::Data ds) override;
@@ -19,17 +19,17 @@ private:
     casacore::PagedImage<float> image;
 };
 
-MSLoader::MSLoader(const std::string &filename)
+CasaLoader::CasaLoader(const std::string &filename)
     : file(filename),
       image(filename)
 {}
 
-void MSLoader::openFile(const std::string &filename) {
+void CasaLoader::openFile(const std::string &filename) {
     file = filename;
     image = casacore::PagedImage<float>(filename);
 }
 
-bool MSLoader::hasData(FileInfo::Data dl) const {
+bool CasaLoader::hasData(FileInfo::Data dl) const {
     switch(dl) {
     case FileInfo::Data::XY:
         return image.shape().size() >= 2;
@@ -43,7 +43,7 @@ bool MSLoader::hasData(FileInfo::Data dl) const {
     return false;
 }
 
-typename MSLoader::image_ref MSLoader::loadData(FileInfo::Data) {
+typename CasaLoader::image_ref CasaLoader::loadData(FileInfo::Data) {
     return image;
 }
 
