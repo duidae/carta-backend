@@ -87,7 +87,7 @@ bool Frame::setChannels(size_t newChannel, size_t newStokes) {
     if(dimensions.size() == 3) {
         count.append(casacore::IPosition(1, 1));
         start.append(casacore::IPosition(1, newChannel));
-    } else if(dimensions == 4) {
+    } else if(dimensions.size() == 4) {
         count.append(casacore::IPosition(2, 1, 1));
         start.append(casacore::IPosition(2, newStokes, newChannel));
     }
