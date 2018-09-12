@@ -128,6 +128,7 @@ bool FileExtInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, stri
         casacore::String ccHdu(m_hdu);
         casacore::uInt hdunum;
         ccHdu.fromString(hdunum, true);
+	hdunum += 1;  // FITSTable starts at 1
         // use FITSTable to get Record of hdu entries
         casacore::FITSTable fitsTable(m_file, hdunum, true); 
         casacore::Record hduEntries(fitsTable.primaryKeywords().toRecord());

@@ -23,6 +23,16 @@ inline casacore::ImageOpener::ImageTypes fileType(const std::string &file) {
      return casacore::ImageOpener::imageType(file);
 }
 
+inline casacore::uInt getFITShdu(const std::string &hdu) {
+    // convert from string to casacore unsigned int
+    casacore::uInt hdunum(0);
+    if (!hdu.empty() && hdu!="0") {
+        casacore::String ccHdu(hdu);
+        ccHdu.fromString(hdunum, true);
+    }
+    return hdunum;
+}
+
 } // namespace FileInfo
 
 class FileLoader {
@@ -33,7 +43,7 @@ public:
     static FileLoader* getLoader(const std::string &file);
 
     // Do anything required to open the file (set up cache size, etc)
-    virtual void openFile(const std::string &file) = 0;
+    virtual void openFile(const std::string &file, const std::string &hdu) = 0;
     // Check to see if the file has a particular HDU/group/table/etc
     virtual bool hasData(FileInfo::Data ds) const = 0;
     // Return a casacore image type representing the data stored in the

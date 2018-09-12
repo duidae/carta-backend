@@ -10,7 +10,7 @@ namespace carta {
 class CasaLoader : public FileLoader {
 public:
     CasaLoader(const std::string &file);
-    void openFile(const std::string &file) override;
+    void openFile(const std::string &file, const std::string &hdu) override;
     bool hasData(FileInfo::Data ds) const override;
     image_ref loadData(FileInfo::Data ds) override;
 
@@ -24,7 +24,7 @@ CasaLoader::CasaLoader(const std::string &filename)
       image(filename)
 {}
 
-void CasaLoader::openFile(const std::string &filename) {
+void CasaLoader::openFile(const std::string &filename, const std::string& /*hdu*/) {
     file = filename;
     image = casacore::PagedImage<float>(filename);
 }

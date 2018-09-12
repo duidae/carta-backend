@@ -10,14 +10,14 @@ namespace carta {
 class HDF5Loader : public FileLoader {
 public:
     HDF5Loader(const std::string &filename);
-    void openFile(const std::string &file) override;
+    void openFile(const std::string &file, const std::string &hdu) override;
     bool hasData(FileInfo::Data ds) const override;
     image_ref loadData(FileInfo::Data ds) override;
 
 private:
     static std::string dataSetToString(FileInfo::Data ds);
 
-    std::string file;
+    std::string file, hdf5Hdu;
     std::unordered_map<std::string, casacore::HDF5Lattice<float>> dataSets;
 };
 
@@ -25,8 +25,9 @@ HDF5Loader::HDF5Loader(const std::string &filename)
     : file(filename)
 {}
 
-void HDF5Loader::openFile(const std::string &filename) {
+void HDF5Loader::openFile(const std::string &filename, const std::string &hdu) {
     file = filename;
+    hdf5Hdu = hdu;
 }
 
 bool HDF5Loader::hasData(FileInfo::Data ds) const {
@@ -57,7 +58,7 @@ bool HDF5Loader::hasData(FileInfo::Data ds) const {
 typename HDF5Loader::image_ref HDF5Loader::loadData(FileInfo::Data ds) {
     std::string data = dataSetToString(ds);
     if(dataSets.find(data) == dataSets.end()) {
-        dataSets.emplace(data, casacore::HDF5Lattice<float>(file, data, "0"));
+        dataSets.emplace(data, casacore::HDF5Lattice<float>(file, data, hdf5Hdu));
     }
     return dataSets[data];
 }

@@ -16,7 +16,7 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
             valid = false;
             return;
         }
-        loader->openFile(filename);
+        loader->openFile(filename, hdu);
         auto &dataSet = loader->loadData(FileInfo::Data::XYZW);
 
         dimensions = dataSet.shape();
@@ -63,8 +63,9 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         valid = setChannels(defaultChannel, 0);
     }
     //TBD: figure out what exceptions need to caught, if any
-    catch (...) {
+    catch (casacore::AipsError& err) {
         log(uuid, "Problem loading file {}", filename);
+        log(uuid, err.getMesg());
         valid = false;
     }
 }
@@ -135,6 +136,7 @@ bool Frame::loadStats(bool loadPercentiles) {
     //TODO: Support multiple HDUs
     if (loader->hasData(FileInfo::Data::Stats) && loader->hasData(FileInfo::Data::Stats2D)) {
         if (loader->hasData(FileInfo::Data::S2DMax)) {
+            std::string hdu;
             auto &dataSet = loader->loadData(FileInfo::Data::S2DMax);
             casacore::IPosition statDims = dataSet.shape();
 

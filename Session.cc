@@ -180,7 +180,7 @@ bool Session::getHduList(FileInfo* fileInfo, casacore::String filename) {
         casacore::FITSImgParser fitsParser(filename.c_str());
         int numHdu(fitsParser.get_numhdu());
         for (int hdu=0; hdu<numHdu; ++hdu) {
-            fileInfo->add_hdu_list(casacore::String::toString(hdu+1));
+            fileInfo->add_hdu_list(casacore::String::toString(hdu));
         }
         hduOK = (fileInfo->hdu_list_size() > 0);
     } else {
