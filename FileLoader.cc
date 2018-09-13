@@ -2,6 +2,7 @@
 #include "FileLoader.h"
 #include "HDF5Loader.h"
 #include "FITSLoader.h"
+#include "MIRIADLoader.h"
 
 using namespace carta;
 
@@ -14,6 +15,7 @@ FileLoader* FileLoader::getLoader(const std::string &file) {
         return new FITSLoader(file);
         break;
     case casacore::ImageOpener::MIRIAD:
+        return new MIRIADLoader(file);
         break;
     case casacore::ImageOpener::GIPSY:
         break;

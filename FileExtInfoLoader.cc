@@ -285,7 +285,7 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
 	casacore::Vector<casacore::Double> axRefVal(imSummary.referenceValues());
 	casacore::Vector<casacore::Double> axInc(imSummary.axisIncrements());
 	casacore::Vector<casacore::String> axUnits(imSummary.axisUnits());
-	for (casacore::uInt i=0; i<dim; ++i) {
+	for (casacore::uInt i=0; i<axNames.size(); ++i) {
             casacore::String suffix(casacore::String::toString(i+1));
 	    // name = CTYPE
             headerEntry = extendedInfo->add_header_entries();
