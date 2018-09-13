@@ -146,14 +146,14 @@ bool Session::fillFileInfo(FileInfo* fileInfo, casacore::File& ccfile) {
     fileInfo->set_name(ccfile.path().baseName());
     casacore::String absFileName(ccfile.path().absoluteName());
     casacore::ImageOpener::ImageTypes imType = casacore::ImageOpener::imageType(absFileName);
-    fileInfo->set_type(getFileType(imType));
+    fileInfo->set_type(convertFileType(imType));
     fileInfoOK = getHduList(fileInfo, absFileName);
     return fileInfoOK;
 }
 
-CARTA::FileType Session::getFileType(int imageType) {
+CARTA::FileType Session::convertFileType(int ccImageType) {
     // convert casacore ImageType to protobuf FileType
-    switch (imageType) {
+    switch (ccImageType) {
         case casacore::ImageOpener::FITS:
             return FileType::FITS;
         case casacore::ImageOpener::AIPSPP:
@@ -272,17 +272,20 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
         ack.set_message(errMessage);
     }
     sendEvent("OPEN_FILE_ACK", requestId, ack);
+}
 
-    // Send histogram of the default channel
-    if (ack.success()) {
-        RegionHistogramData histogramMessage;
-        histogramMessage.set_file_id(message.file_id());
-        histogramMessage.set_stokes(frames[message.file_id()]->currentStokes());
-        // -1 corresponds to the entire current XY plane
-        histogramMessage.set_region_id(-1);
-        histogramMessage.mutable_histograms()->AddAllocated(new Histogram(frames[message.file_id()]->currentHistogram()));
-        sendEvent("REGION_HISTOGRAM_DATA", 0, histogramMessage);
+CARTA::RegionHistogramData* Session::getRegionHistogram(const int32_t fileId, const int32_t regionId) {
+    RegionHistogramData* histogramMessage(nullptr);
+    if (frames.count(fileId)) {
+        histogramMessage = new RegionHistogramData();
+        histogramMessage->set_file_id(fileId);
+        // default -1 corresponds to the entire current XY plane
+        histogramMessage->set_region_id(regionId);
+        auto& frame = frames[fileId];
+        histogramMessage->set_stokes(frame->currentStokes());
+        histogramMessage->mutable_histograms()->AddAllocated(new Histogram(frames[fileId]->currentHistogram()));
     }
+    return histogramMessage;
 }
 
 void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
@@ -295,17 +298,22 @@ void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
 }
 
 void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
-    // Check if frame is loaded
     compressionType = message.compression_type();
     compressionQuality = message.compression_quality();
     numSubsets = message.num_subsets();
 
+    // Check if frame is loaded
     if (frames.count(message.file_id())) {
         auto& frame = frames[message.file_id()];
+        CARTA::ImageBounds frameBounds(frame->currentBounds());
+        CARTA::RegionHistogramData* histogram(nullptr);
+	// send histogram for new frame
+	if (frameBounds.x_max()==0 && frameBounds.y_max()==0)
+            histogram = getRegionHistogram(message.file_id());
         if (!frame->setBounds(message.image_bounds(), message.mip())) {
             // TODO: Error handling on bounds
         }
-        sendImageData(message.file_id(), requestId);
+        sendImageData(message.file_id(), requestId, histogram);
     } else {
         // TODO: error handling
     }
@@ -411,19 +419,16 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
             // TODO: Error handling on bounds
         }
         // Send updated histogram
-        RegionHistogramData* histogramMessage = new RegionHistogramData();
-        histogramMessage->set_file_id(message.file_id());
-        histogramMessage->set_stokes(frames[message.file_id()]->currentStokes());
-        // -1 corresponds to the entire current XY plane
-        histogramMessage->set_region_id(-1);
-        histogramMessage->mutable_histograms()->AddAllocated(new Histogram(frames[message.file_id()]->currentHistogram()));
-        //sendEvent("REGION_HISTOGRAM_DATA", 0, histogramMessage);
+        RegionHistogramData* histogramMessage = getRegionHistogram(message.file_id());
         // Histogram message now managed by the image data object
         sendImageData(message.file_id(), requestId, histogramMessage);
     } else {
         // TODO: error handling
     }
 }
+
+// *********************************************************************************
+// SEND uWEBSOCKET MESSAGES
 
 // Sends an event to the client with a given event name (padded/concatenated to 32 characters) and a given ProtoBuf message
 void Session::sendEvent(string eventName, u_int64_t eventId, google::protobuf::MessageLite& message) {

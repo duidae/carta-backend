@@ -85,12 +85,15 @@ protected:
 
     // FileInfo
     bool fillFileInfo(CARTA::FileInfo* fileInfo, casacore::File& ccfile);
-    CARTA::FileType getFileType(int casacoreImType);
+    CARTA::FileType convertFileType(int ccImageType);
     bool getHduList(CARTA::FileInfo* fileInfo, casacore::String filename);
 
     // FileInfoExtended
     bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo,
         const std::string folder, const std::string filename, std::string hdu, std::string& message);
+
+    // Histogram
+    CARTA::RegionHistogramData* getRegionHistogram(const int32_t fileId, const int32_t regionId=-1);
 
     // Send data
     void sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
