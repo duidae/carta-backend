@@ -2,13 +2,14 @@
 #include <gtest/gtest.h>
 #include <string>
 
-void verify_pop_order(ctpl::detail::PriorityQueue<std::string> &pq,
-                      std::vector<std::string> order) {
-    for(std::string s : order) {
+template <typename T>
+void verify_pop_order(ctpl::detail::PriorityQueue<T> &pq,
+                      const std::initializer_list<T> &order) {
+    for(const T &item : order) {
         EXPECT_FALSE(pq.empty());
-        std::string out;
+        T out;
         pq.pop(out);
-        EXPECT_EQ(out, s);
+        EXPECT_EQ(out, item);
     }
     EXPECT_TRUE(pq.empty());
 }
@@ -24,16 +25,19 @@ TEST(TestPriorityQueue, TestPush) {
     pq.push(0, 3, "first");
     pq.push(0, 2, "second");
 
-    verify_pop_order(pq, {"first", "second", "third"});
+    verify_pop_order<std::string>(pq, {"first", "second", "third"});
 }
 
 TEST(TestPriorityQueue, TestPushNoPriority) {
-    ctpl::detail::PriorityQueue<std::string> pq;
-    pq.push(0, 0, "first");
-    pq.push(0, 0, "second");
-    pq.push(0, 0, "third");
+    ctpl::detail::PriorityQueue<int> pq;
+    pq.push(7, 0, 5);
+    pq.push(6, 0, 2);
+    pq.push(1, 0, 3);
+    pq.push(2, 0, 6);
+    pq.push(4, 0, 1);
+    pq.push(3, 0, 4);
 
-    verify_pop_order(pq, {"first", "second", "third"});
+    verify_pop_order<int>(pq, {5, 2, 3, 6, 1, 4});
 }
 
 TEST(TestPriorityQueue, TestRemoveId) {
@@ -44,7 +48,7 @@ TEST(TestPriorityQueue, TestRemoveId) {
 
     pq.remove_id(1);
 
-    verify_pop_order(pq, {"second", "third"});
+    verify_pop_order<std::string>(pq, {"second", "third"});
 }
 
 TEST(TestPriorityQueue, TestRemovePriority) {
@@ -55,7 +59,7 @@ TEST(TestPriorityQueue, TestRemovePriority) {
 
     pq.remove_priority(2);
 
-    verify_pop_order(pq, {"first", "third"});
+    verify_pop_order<std::string>(pq, {"first", "third"});
 }
 
 TEST(TestPriorityQueue, TestNoRemove) {
@@ -67,5 +71,5 @@ TEST(TestPriorityQueue, TestNoRemove) {
     pq.remove_id(5);
     pq.remove_priority(7);
 
-    verify_pop_order(pq, {"first", "second", "third"});
+    verify_pop_order<std::string>(pq, {"first", "second", "third"});
 }
