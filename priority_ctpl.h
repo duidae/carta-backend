@@ -47,7 +47,7 @@ public:
         std::unique_lock<std::mutex> lock(this->mutex);
         auto item = q_t{id, priority, value};
         auto comp = [](const q_t &i1, const q_t &i2) {
-            return std::get<1>(i1) > std::get<1>(i2); };
+            return std::get<1>(i1) < std::get<1>(i2); };
         auto hint = std::lower_bound(q.begin(), q.end(), item, comp);
         this->q.insert(hint, item);
         return true;
@@ -57,17 +57,17 @@ public:
         std::unique_lock<std::mutex> lock(this->mutex);
         if (this->q.empty())
             return false;
-        std::tie(std::ignore, std::ignore, v) = this->q.front();
-        this->q.pop_front();
+        std::tie(std::ignore, std::ignore, v) = this->q.back();
+        this->q.pop_back();
         return true;
     }
     bool remove_id(int id) {
         auto comp = [&id](const q_t &i){ return std::get<0>(i) == id; };
-        return remove(comp);
+        return this->remove(comp);
     }
     bool remove_priority(int prio) {
         auto comp = [&prio](const q_t &i){ return std::get<1>(i) == prio; };
-        return remove(comp);
+        return this->remove(comp);
     }
     bool empty() {
         std::unique_lock<std::mutex> lock(this->mutex);
@@ -77,7 +77,7 @@ private:
     template <typename Comp>
     bool remove(Comp comp) {
         std::unique_lock<std::mutex> lock(this->mutex);
-        this->q.erase(std::remove_if(q.begin(),q.end(), comp));
+        this->q.erase(std::remove_if(q.begin(),q.end(), comp), q.end());
         return true;
     }
     std::deque<q_t> q;
