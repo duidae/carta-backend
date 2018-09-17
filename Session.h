@@ -21,7 +21,7 @@
 #include <carta-protobuf/region_histogram.pb.h>
 
 #include "compression.h"
-#include "ctpl.h"
+#include "priority_ctpl.h"
 #include "Frame.h"
 
 #define MAX_SUBSETS 8

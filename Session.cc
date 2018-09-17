@@ -363,7 +363,7 @@ void Session::sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogr
                 int N = min(numSubsets, MAX_SUBSETS);;
                 for (auto i = 0; i < N; i++) {
                     auto& compressionBuffer = compressionBuffers[i];
-                    futureSizes.push_back(threadPool.push([&nanEncodings, &imageData, &compressionBuffer, numRows, N, rowLength, i, precision](int) {
+                    futureSizes.push_back(threadPool.push(0,0,[&nanEncodings, &imageData, &compressionBuffer, numRows, N, rowLength, i, precision](int) {
                         int subsetRowStart = i * (numRows / N);
                         int subsetRowEnd = (i + 1) * (numRows / N);
                         if (i == N - 1) {
