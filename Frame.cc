@@ -119,6 +119,7 @@ bool Frame::setBounds(CARTA::ImageBounds imageBounds, int newMip) {
 
     bounds = imageBounds;
     mip = newMip;
+    boundsDefined = true;
     return true;
 }
 
@@ -402,18 +403,19 @@ bool Frame::loadStats(bool loadPercentiles) {
     return true;
 }
 
-vector<float> Frame::getImageData(bool meanFilter) {
+std::vector<float> Frame::getImageData(bool meanFilter) {
     if (!valid) {
-        return vector<float>();
+        return std::vector<float>();
     }
 
+    CARTA::ImageBounds bounds(currentBounds());
     const int x = bounds.x_min();
     const int y = bounds.y_min();
     const int reqHeight = bounds.y_max() - bounds.y_min();
     const int reqWidth = bounds.x_max() - bounds.x_min();
 
     if (height < y + reqHeight || width < x + reqWidth) {
-        return vector<float>();
+        return std::vector<float>();
     }
 
     size_t numRowsRegion = reqHeight / mip;
@@ -505,18 +507,23 @@ CARTA::Histogram Frame::currentHistogram() {
     return histogram;
 }
 
-int Frame::currentStokes() {
-    return stokesIndex;
+CARTA::ImageBounds Frame::currentBounds() {
+    return bounds;
 }
 
 int Frame::currentChannel() {
     return channelIndex;
 }
 
+int Frame::currentStokes() {
+    return stokesIndex;
+}
+
 int Frame::currentMip() {
     return mip;
 }
 
-CARTA::ImageBounds Frame::currentBounds() {
-    return bounds;
+bool Frame::boundsSet() {
+    return boundsDefined;
 }
+

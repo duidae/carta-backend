@@ -19,44 +19,42 @@
 #include <carta-protobuf/set_image_channels.pb.h>
 #include <carta-protobuf/close_file.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
+#include <carta-protobuf/raster_image.pb.h>
 
-#include "compression.h"
 #include "ctpl.h"
 #include "Frame.h"
 
 #define MAX_SUBSETS 8
 
-struct RegionStats {
-    float minVal = std::numeric_limits<float>::max();
-    float maxVal = -std::numeric_limits<float>::max();
-    float mean = 0;
-    float stdDev = 0;
-    int nanCount = 0;
-    int validCount = 0;
+struct CompressionSettings {
+    CARTA::CompressionType type;
+    float quality;
+    int nsubsets;
 };
-
 
 class Session {
 public:
     boost::uuids::uuid uuid;
 protected:
-    // TODO: clean up frames on session delete
-    std::map<int, std::unique_ptr<Frame>> frames;
-    std::mutex eventMutex;
+    // communication
     uWS::WebSocket<uWS::SERVER>* socket;
-    std::string apiKey;
+    std::vector<char> binaryPayloadCache;
+
+    // permissions
     std::map<std::string, std::vector<std::string> >& permissionsMap;
     bool permissionsEnabled;
+    std::string apiKey;
+
     std::string baseFolder;
-    std::vector<char> binaryPayloadCache;
-    std::vector<char> compressionBuffers[MAX_SUBSETS];
     bool verboseLogging;
+
+    // <file_id, Frame>: one frame per image file
+    // TODO: clean up frames on session delete
+    std::map<int, std::unique_ptr<Frame>> frames;
+
+    // for data compression
     ctpl::thread_pool& threadPool;
-    float rateSum;
-    int rateCount;
-    CARTA::CompressionType compressionType;
-    float compressionQuality;
-    int numSubsets;
+    CompressionSettings compressionSettings;
 
 public:
     Session(uWS::WebSocket<uWS::SERVER>* ws,
@@ -66,6 +64,8 @@ public:
             std::string folder,
             ctpl::thread_pool& serverThreadPool,
             bool verbose = false);
+    ~Session();
+
     // CARTA ICD
     void onRegisterViewer(const CARTA::RegisterViewer& message, uint32_t requestId);
     void onFileListRequest(const CARTA::FileListRequest& request, uint32_t requestId);
@@ -74,31 +74,28 @@ public:
     void onCloseFile(const CARTA::CloseFile& message, uint32_t requestId);
     void onSetImageView(const CARTA::SetImageView& message, uint32_t requestId);
     void onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId);
-    ~Session();
 
 protected:
-
-    // File list response
+    // ICD: File list response
     CARTA::FileListResponse getFileList(std::string folder);
     bool checkPermissionForDirectory(std:: string prefix);
     bool checkPermissionForEntry(std::string entry);
 
-    // FileInfo
-    bool fillFileInfo(CARTA::FileInfo* fileInfo, casacore::File& ccfile);
+    // ICD: File info response
+    bool fillFileInfo(CARTA::FileInfo* fileInfo, const std::string& filename);
     CARTA::FileType convertFileType(int ccImageType);
     bool getHduList(CARTA::FileInfo* fileInfo, casacore::String filename);
-
-    // FileInfoExtended
     bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo,
         const std::string folder, const std::string filename, std::string hdu, std::string& message);
 
-    // Histogram
-    CARTA::RegionHistogramData* getRegionHistogram(const int32_t fileId, const int32_t regionId=-1);
+    // ICD: Send raster image data, optionally with histogram
+    void sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
+    CARTA::RegionHistogramData* getRegionHistogramData(const int32_t fileId, const int32_t regionId=-1);
 
-    // Send data
-    void sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
+    // data compression
+    void setCompression(CARTA::CompressionType type, float quality, int nsubsets);
 
-    // Send protobuf message
+    // Send protobuf messages
     void sendEvent(std::string eventName, u_int64_t eventId, google::protobuf::MessageLite& message);
     void sendLogEvent(std::string message, std::vector<std::string> tags, CARTA::ErrorSeverity severity);
 };

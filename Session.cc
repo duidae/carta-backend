@@ -1,5 +1,6 @@
 #include "Session.h"
-#include "FileExtInfoLoader.h"
+#include "FileInfoLoader.h"
+#include "compression.h"
 
 #include <carta-protobuf/raster_image.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
@@ -7,8 +8,6 @@
 
 #include <casacore/casa/OS/Path.h>
 #include <casacore/casa/OS/DirectoryIterator.h>
-#include <casacore/images/Images/ImageOpener.h>
-#include <casacore/images/Images/FITSImgParser.h>
 
 using namespace std;
 using namespace CARTA;
@@ -16,14 +15,12 @@ using namespace CARTA;
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
 Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, ctpl::thread_pool& serverThreadPool, bool verbose)
     : uuid(uuid),
+      socket(ws),
       permissionsMap(permissionsMap),
       permissionsEnabled(enforcePermissions),
       baseFolder(folder),
       verboseLogging(verbose),
-      threadPool(serverThreadPool),
-      rateSum(0),
-      rateCount(0),
-      socket(ws) {
+      threadPool(serverThreadPool) {
 }
 
 Session::~Session() {
@@ -80,6 +77,9 @@ bool Session::checkPermissionForDirectory(std::string prefix) {
     }
 }
 
+// ********************************************************************************
+// File browser
+
 FileListResponse Session::getFileList(string folder) {
     // fill FileListResponse
     casacore::Path fullPath(baseFolder);
@@ -119,7 +119,7 @@ FileListResponse Session::getFileList(string folder) {
 
                 if (addImage) { // add image to file list
                     auto fileInfo = fileList.add_files();
-                    fillFileInfo(fileInfo, ccfile);
+                    fillFileInfo(fileInfo, fullpath);
                 }
                 dirIter++;
             }
@@ -139,54 +139,10 @@ FileListResponse Session::getFileList(string folder) {
     return fileList;
 }
 
-bool Session::fillFileInfo(FileInfo* fileInfo, casacore::File& ccfile) {
+bool Session::fillFileInfo(FileInfo* fileInfo, const string& filename) {
     // fill FileInfo submessage
-    bool fileInfoOK(true);
-    fileInfo->set_size(ccfile.size());
-    fileInfo->set_name(ccfile.path().baseName());
-    casacore::String absFileName(ccfile.path().absoluteName());
-    casacore::ImageOpener::ImageTypes imType = casacore::ImageOpener::imageType(absFileName);
-    fileInfo->set_type(convertFileType(imType));
-    fileInfoOK = getHduList(fileInfo, absFileName);
-    return fileInfoOK;
-}
-
-CARTA::FileType Session::convertFileType(int ccImageType) {
-    // convert casacore ImageType to protobuf FileType
-    switch (ccImageType) {
-        case casacore::ImageOpener::FITS:
-            return FileType::FITS;
-        case casacore::ImageOpener::AIPSPP:
-            return FileType::CASA;
-        case casacore::ImageOpener::HDF5:
-            return FileType::HDF5;
-        case casacore::ImageOpener::MIRIAD:
-            return FileType::MIRIAD;
-        default:
-            return FileType::UNKNOWN;
-    }
-}
-
-bool Session::getHduList(FileInfo* fileInfo, casacore::String filename) {
-    // fill FileInfo hdu list
-    bool hduOK(true);
-    if (fileInfo->type()==CARTA::HDF5) {
-        casacore::HDF5File hdfFile(filename);
-        std::vector<casacore::String> hdus(casacore::HDF5Group::linkNames(hdfFile));
-        for (auto groupName : hdus)
-            fileInfo->add_hdu_list(groupName);
-        hduOK = (fileInfo->hdu_list_size() > 0);
-    } else if (fileInfo->type()==CARTA::FITS) {
-        casacore::FITSImgParser fitsParser(filename.c_str());
-        int numHdu(fitsParser.get_numhdu());
-        for (int hdu=0; hdu<numHdu; ++hdu) {
-            fileInfo->add_hdu_list(casacore::String::toString(hdu));
-        }
-        hduOK = (fileInfo->hdu_list_size() > 0);
-    } else {
-        fileInfo->add_hdu_list("");
-    }
-    return hduOK;
+    FileInfoLoader infoLoader(filename);
+    return infoLoader.fillFileInfo(fileInfo);
 }
 
 bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fileInfo, 
@@ -197,18 +153,45 @@ bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fil
     ccpath.append(folder);
     ccpath.append(filename);
     casacore::File ccfile(ccpath);
+    casacore::String fullname(ccfile.path().absoluteName());
     try {
-        if (!fillFileInfo(fileInfo, ccfile)) {
+        FileInfoLoader infoLoader(fullname);
+        if (!infoLoader.fillFileInfo(fileInfo)) {
              return false;
         }
-        casacore::String fullname(ccfile.path().absoluteName());
-        FileExtInfoLoader extLoader(fullname, hdu);
-        extFileInfoOK = extLoader.fillFileExtInfo(extendedInfo, message);
+        extFileInfoOK = infoLoader.fillFileExtInfo(extendedInfo, hdu, message);
     } catch (casacore::AipsError& ex) {
         message = ex.getMesg();
         extFileInfoOK = false;
     }
     return extFileInfoOK;
+}
+
+
+// ********************************************************************************
+// Histogram message; sent separately or within RasterImageData
+
+CARTA::RegionHistogramData* Session::getRegionHistogramData(const int32_t fileId, const int32_t regionId) {
+    RegionHistogramData* histogramMessage(nullptr);
+    if (frames.count(fileId)) {
+        histogramMessage = new RegionHistogramData();
+        histogramMessage->set_file_id(fileId);
+        // default -1 corresponds to the entire current XY plane
+        histogramMessage->set_region_id(regionId);
+        auto& frame = frames[fileId];
+        histogramMessage->set_stokes(frame->currentStokes());
+        histogramMessage->mutable_histograms()->AddAllocated(new Histogram(frames[fileId]->currentHistogram()));
+    }
+    return histogramMessage;
+}
+
+// ********************************************************************************
+// Compress data
+
+void Session::setCompression(CARTA::CompressionType type, float quality, int nsubsets) {
+    compressionSettings.type = type;
+    compressionSettings.quality = quality;
+    compressionSettings.nsubsets = nsubsets;
 }
 
 // *********************************************************************************
@@ -229,7 +212,7 @@ void Session::onFileListRequest(const FileListRequest& request, uint32_t request
     if (basePath.back()=='/') basePath.pop_back();
     if (folder.find(basePath)==0) {
         folder.replace(0, basePath.length(), "");
-	if (folder.front()=='/') folder.replace(0,1,""); // remove leading '/'
+        if (folder.front()=='/') folder.replace(0,1,""); // remove leading '/'
     }
     FileListResponse response = getFileList(folder);
     sendEvent("FILE_LIST_RESPONSE", requestId, response);
@@ -254,10 +237,12 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
     string errMessage;
     bool infoSuccess = fillExtendedFileInfo(fileInfoExtended, fileInfo, message.directory(), message.file(), message.hdu(), errMessage);
     if (infoSuccess && fileInfo->hdu_list_size()) {
-	casacore::Path path(baseFolder);
-	path.append(message.directory());
-	path.append(message.file());
+        // form filename with path
+        casacore::Path path(baseFolder);
+        path.append(message.directory());
+        path.append(message.file());
         string filename(path.absoluteName());
+        // create Frame for open file
         string hdu = fileInfo->hdu_list(0);
         auto frame = unique_ptr<Frame>(new Frame(boost::uuids::to_string(uuid), filename, hdu));
         if (frame->isValid()) {
@@ -274,20 +259,6 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
     sendEvent("OPEN_FILE_ACK", requestId, ack);
 }
 
-CARTA::RegionHistogramData* Session::getRegionHistogram(const int32_t fileId, const int32_t regionId) {
-    RegionHistogramData* histogramMessage(nullptr);
-    if (frames.count(fileId)) {
-        histogramMessage = new RegionHistogramData();
-        histogramMessage->set_file_id(fileId);
-        // default -1 corresponds to the entire current XY plane
-        histogramMessage->set_region_id(regionId);
-        auto& frame = frames[fileId];
-        histogramMessage->set_stokes(frame->currentStokes());
-        histogramMessage->mutable_histograms()->AddAllocated(new Histogram(frames[fileId]->currentHistogram()));
-    }
-    return histogramMessage;
-}
-
 void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
     auto id = message.file_id();
     if (id == -1) {
@@ -298,29 +269,51 @@ void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
 }
 
 void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
-    compressionType = message.compression_type();
-    compressionQuality = message.compression_quality();
-    numSubsets = message.num_subsets();
+    // Check if Frame is loaded
+    auto fileId = message.file_id();
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        bool isNewImgView(!frame->boundsSet());
 
-    // Check if frame is loaded
-    if (frames.count(message.file_id())) {
-        auto& frame = frames[message.file_id()];
-        CARTA::ImageBounds frameBounds(frame->currentBounds());
-        CARTA::RegionHistogramData* histogram(nullptr);
-	// send histogram for new frame
-	if (frameBounds.x_max()==0 && frameBounds.y_max()==0)
-            histogram = getRegionHistogram(message.file_id());
+        // set new view in Frame
         if (!frame->setBounds(message.image_bounds(), message.mip())) {
             // TODO: Error handling on bounds
         }
-        sendImageData(message.file_id(), requestId, histogram);
+
+        CARTA::CompressionType ctype(message.compression_type());
+        int numsets(message.num_subsets());
+        float quality(message.compression_quality());
+        setCompression(ctype, quality, numsets);
+
+        CARTA::RegionHistogramData* histogram(nullptr);
+        if (isNewImgView)  // send histogram for new frame img view
+            histogram = getRegionHistogramData(fileId);
+
+        // RESPONSE
+        sendRasterImageData(fileId, requestId, histogram);
     } else {
         // TODO: error handling
     }
 
 }
 
-void Session::sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram) {
+void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        if (!frame->setChannels(message.channel(), message.stokes())) {
+            // TODO: Error handling on bounds
+        }
+        // Send updated histogram
+        RegionHistogramData* histogramData = getRegionHistogramData(fileId);
+        // Histogram message now managed by the image data object
+        sendRasterImageData(fileId, requestId, histogramData);
+    } else {
+        // TODO: error handling
+    }
+}
+
+void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram) {
     RasterImageData rasterImageData;
     // Add histogram, if it exists
     if (channelHistogram) {
@@ -343,18 +336,21 @@ void Session::sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogr
             rasterImageData.mutable_image_bounds()->set_y_min(imageBounds.y_min());
             rasterImageData.mutable_image_bounds()->set_y_max(imageBounds.y_max());
 
+	    auto compressionType = compressionSettings.type;
             if (compressionType == CompressionType::NONE) {
                 rasterImageData.set_compression_type(CompressionType::NONE);
                 rasterImageData.set_compression_quality(0);
                 rasterImageData.add_image_data(imageData.data(), imageData.size() * sizeof(float));
             } else if (compressionType == CompressionType::ZFP) {
 
-                int precision = lround(compressionQuality);
+                int precision = lround(compressionSettings.quality);
                 auto rowLength = (imageBounds.x_max() - imageBounds.x_min()) / mip;
                 auto numRows = (imageBounds.y_max() - imageBounds.y_min()) / mip;
                 rasterImageData.set_compression_type(CompressionType::ZFP);
                 rasterImageData.set_compression_quality(precision);
 
+                auto numSubsets(compressionSettings.nsubsets);
+		vector<char> compressionBuffers[numSubsets];
                 vector<size_t> compressedSizes(numSubsets);
                 vector<vector<int32_t>> nanEncodings(numSubsets);
                 vector<future<size_t>> futureSizes;
@@ -409,21 +405,6 @@ void Session::sendImageData(int fileId, uint32_t requestId, CARTA::RegionHistogr
             // Send completed event to client
             sendEvent("RASTER_IMAGE_DATA", requestId, rasterImageData);
         }
-    }
-}
-
-void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId) {
-    if (frames.count(message.file_id())) {
-        auto& frame = frames[message.file_id()];
-        if (!frame->setChannels(message.channel(), message.stokes())) {
-            // TODO: Error handling on bounds
-        }
-        // Send updated histogram
-        RegionHistogramData* histogramMessage = getRegionHistogram(message.file_id());
-        // Histogram message now managed by the image data object
-        sendImageData(message.file_id(), requestId, histogramMessage);
-    } else {
-        // TODO: error handling
     }
 }
 

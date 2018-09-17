@@ -1,42 +1,100 @@
-//# FileExtInfoLoader.cc: fill FileInfoExtended for all supported file types
+//# FileInfoLoader.cc: fill FileInfoExtended for all supported file types
 
-#include "FileExtInfoLoader.h"
+#include "FileInfoLoader.h"
 
 #include <fmt/format.h>
 #include <H5Cpp.h>
 #include <H5File.h>
+
+#include <casacore/casa/OS/File.h>
 #include <casacore/fits/FITS/FITSTable.h>
-#include <casacore/images/Images/PagedImage.h>
-#include <casacore/images/Images/FITSImage.h>
-#include <casacore/images/Images/MIRIADImage.h>
+#include <casacore/casa/HDF5/HDF5File.h>
+#include <casacore/casa/HDF5/HDF5Group.h>
 #include <casacore/images/Images/ImageSummary.h>
+#include <casacore/images/Images/FITSImgParser.h>
+#include <casacore/images/Images/MIRIADImage.h>
+#include <casacore/images/Images/PagedImage.h>
 
 using namespace std;
 using namespace CARTA;
 using namespace H5;
 
-FileExtInfoLoader::FileExtInfoLoader(const string& filename, const string& hdu) :
-    m_file(filename), m_hdu(hdu) {
+FileInfoLoader::FileInfoLoader(const string& filename) :
+    m_file(filename) {
     m_type = fileType(filename);
 }
 
 casacore::ImageOpener::ImageTypes
-FileExtInfoLoader::fileType(const std::string &file) {
+FileInfoLoader::fileType(const std::string &file) {
     return casacore::ImageOpener::imageType(file);
 }
 
-bool FileExtInfoLoader::fillFileExtInfo(FileInfoExtended* extInfo, string& message) {
+//#################################################################################
+// FILE INFO
+
+bool FileInfoLoader::fillFileInfo(FileInfo* fileInfo) {
+    // fill FileInfo submessage
+    casacore::File ccfile(m_file);
+    fileInfo->set_size(ccfile.size());
+    fileInfo->set_name(ccfile.path().baseName());
+    casacore::String absFileName(ccfile.path().absoluteName());
+    fileInfo->set_type(convertFileType(m_type));
+    return getHduList(fileInfo, absFileName);
+}
+
+CARTA::FileType FileInfoLoader::convertFileType(int ccImageType) {
+    // convert casacore ImageType to protobuf FileType
+    switch (ccImageType) {
+        case casacore::ImageOpener::FITS:
+            return FileType::FITS;
+        case casacore::ImageOpener::AIPSPP:
+            return FileType::CASA;
+        case casacore::ImageOpener::HDF5:
+            return FileType::HDF5;
+        case casacore::ImageOpener::MIRIAD:
+            return FileType::MIRIAD;
+        default:
+            return FileType::UNKNOWN;
+    }
+}
+
+bool FileInfoLoader::getHduList(FileInfo* fileInfo, const std::string& filename) {
+    // fill FileInfo hdu list
+    bool hduOK(true);
+    if (fileInfo->type()==CARTA::HDF5) {
+        casacore::HDF5File hdfFile(filename);
+        std::vector<casacore::String> hdus(casacore::HDF5Group::linkNames(hdfFile));
+        for (auto groupName : hdus)
+            fileInfo->add_hdu_list(groupName);
+        hduOK = (fileInfo->hdu_list_size() > 0);
+    } else if (fileInfo->type()==CARTA::FITS) {
+        casacore::FITSImgParser fitsParser(filename.c_str());
+        int numHdu(fitsParser.get_numhdu());
+        for (int hdu=0; hdu<numHdu; ++hdu) {
+            fileInfo->add_hdu_list(casacore::String::toString(hdu));
+        }
+        hduOK = (fileInfo->hdu_list_size() > 0);
+    } else {
+        fileInfo->add_hdu_list("");
+    }
+    return hduOK;
+}
+
+//#################################################################################
+// FILE INFO EXTENDED
+
+bool FileInfoLoader::fillFileExtInfo(FileInfoExtended* extInfo, string& hdu, string& message) {
     bool extInfoOK(false);
     switch(m_type) {
     case casacore::ImageOpener::AIPSPP:
         extInfoOK = fillCASAExtFileInfo(extInfo, message);
         break;
     case casacore::ImageOpener::FITS:
-        extInfoOK = fillFITSExtFileInfo(extInfo, message);
+        extInfoOK = fillFITSExtFileInfo(extInfo, hdu, message);
         break;
     case casacore::ImageOpener::HDF5:
-        extInfoOK = fillHdf5ExtFileInfo(extInfo, message);
-	break;
+        extInfoOK = fillHdf5ExtFileInfo(extInfo, hdu, message);
+        break;
     case casacore::ImageOpener::MIRIAD:
         extInfoOK = fillCASAExtFileInfo(extInfo, message);
         break;
@@ -46,19 +104,19 @@ bool FileExtInfoLoader::fillFileExtInfo(FileInfoExtended* extInfo, string& messa
     return extInfoOK;
 }
 
-bool FileExtInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string& message) {
+bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string& hdu, string& message) {
     // Add extended info for HDF5 file
     bool extInfoOK(true);
     H5File file(m_file, H5F_ACC_RDONLY);
     bool hasHDU;
-    if (m_hdu.length()) {
-        hasHDU = H5Lexists(file.getId(), m_hdu.c_str(), 0);
+    if (hdu.length()) {
+        hasHDU = H5Lexists(file.getId(), hdu.c_str(), 0);
     } else {
         auto N = file.getNumObjs();
         hasHDU = false;
         for (auto i = 0; i < N; i++) {
             if (file.getObjTypeByIdx(i) == H5G_GROUP) {
-                m_hdu = file.getObjnameByIdx(i);
+                hdu = file.getObjnameByIdx(i);
                 hasHDU = true;
                 break;
             }
@@ -66,7 +124,7 @@ bool FileExtInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, stri
     }
 
     if (hasHDU) {
-        H5::Group topLevelGroup = file.openGroup(m_hdu);
+        H5::Group topLevelGroup = file.openGroup(hdu);
         if (H5Lexists(topLevelGroup.getId(), "DATA", 0)) {
             DataSet dataSet = topLevelGroup.openDataSet("DATA");
             vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
@@ -121,14 +179,15 @@ bool FileExtInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, stri
     return extInfoOK;
 }
 
-bool FileExtInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string& message) {
+bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string& hdu, string& message) {
     bool extInfoOK(true);
     try {
         // convert string hdu to unsigned int
-        casacore::String ccHdu(m_hdu);
+        casacore::String ccHdu(hdu);
         casacore::uInt hdunum;
         ccHdu.fromString(hdunum, true);
-	hdunum += 1;  // FITSTable starts at 1
+        hdunum += 1;  // FITSTable starts at 1
+
         // use FITSTable to get Record of hdu entries
         casacore::FITSTable fitsTable(m_file, hdunum, true); 
         casacore::Record hduEntries(fitsTable.primaryKeywords().toRecord());
@@ -151,10 +210,10 @@ bool FileExtInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, stri
         // set header entries 
         for (casacore::uInt field=0; field < hduEntries.nfields(); ++field) {
             casacore::String name = hduEntries.name(field);
-	    if ((name!="SIMPLE") && (name!="BITPIX") && !name.startsWith("PC")) {
+        if ((name!="SIMPLE") && (name!="BITPIX") && !name.startsWith("PC")) {
                 auto headerEntry = extendedInfo->add_header_entries();
                 headerEntry->set_name(name);
-		casacore::DataType dtype(hduEntries.type(field));
+                casacore::DataType dtype(hduEntries.type(field));
                 switch (dtype) {
                     case casacore::TpString: {
                         *headerEntry->mutable_value() = hduEntries.asString(field);
@@ -188,7 +247,7 @@ bool FileExtInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, stri
     return extInfoOK;
 }
 
-bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string& message) {
+bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string& message) {
     bool extInfoOK(true);
     casacore::ImageInterface<casacore::Float>* ccImage(nullptr);
     try {
@@ -204,10 +263,10 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
             default:
                 break;
         }
-	casacore::ImageInfo imInfo(ccImage->imageInfo());
+        casacore::ImageInfo imInfo(ccImage->imageInfo());
         casacore::ImageSummary<casacore::Float> imSummary(*ccImage);
-	// set dimensions
-	casacore::Int dim(imSummary.ndim());
+        // set dim
+        casacore::Int dim(imSummary.ndim());
         extendedInfo->set_dimensions(dim);
         if (dim < 2 || dim > 4) {
             message = "Image must be 2D, 3D or 4D.";
@@ -232,20 +291,20 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
             headerEntry->set_entry_type(EntryType::INT);
             headerEntry->set_numeric_value(imShape(i));
         }
-	// BMAJ, BMIN, BPA
-	if (imInfo.hasBeam() && imInfo.hasSingleBeam()) {
+        // BMAJ, BMIN, BPA
+        if (imInfo.hasBeam() && imInfo.hasSingleBeam()) {
             // get values
             casacore::GaussianBeam rbeam(imInfo.restoringBeam());
-	    casacore::Quantity majAx(rbeam.getMajor()), minAx(rbeam.getMinor()),
+            casacore::Quantity majAx(rbeam.getMajor()), minAx(rbeam.getMinor()),
                 pa(rbeam.getPA(true));
-	    majAx.convert("deg");
-	    minAx.convert("deg");
-	    pa.convert("deg");
-	    if (majAx.getValue()<1.0 || minAx.getValue()<1.0) {
+            majAx.convert("deg");
+            minAx.convert("deg");
+            pa.convert("deg");
+            if (majAx.getValue()<1.0 || minAx.getValue()<1.0) {
                 majAx.convert(casacore::Unit("arcsec"));
                 minAx.convert(casacore::Unit("arcsec"));
             }
-	    // add to header entries
+            // add to header entries
             casacore::Double bmaj(majAx.getValue()), bmin(minAx.getValue());
             casacore::Float bpa(pa.getValue());
             headerEntry = extendedInfo->add_header_entries();
@@ -279,65 +338,65 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
         headerEntry->set_name("BUNIT");
         *headerEntry->mutable_value() = imSummary.units().getName();
         headerEntry->set_entry_type(EntryType::STRING);
-	// axes values
-	casacore::Vector<casacore::String> axNames(imSummary.axisNames());
-	casacore::Vector<casacore::Double> axRefPix(imSummary.referencePixels());
-	casacore::Vector<casacore::Double> axRefVal(imSummary.referenceValues());
-	casacore::Vector<casacore::Double> axInc(imSummary.axisIncrements());
-	casacore::Vector<casacore::String> axUnits(imSummary.axisUnits());
-	for (casacore::uInt i=0; i<axNames.size(); ++i) {
+        // axes values
+        casacore::Vector<casacore::String> axNames(imSummary.axisNames());
+        casacore::Vector<casacore::Double> axRefPix(imSummary.referencePixels());
+        casacore::Vector<casacore::Double> axRefVal(imSummary.referenceValues());
+        casacore::Vector<casacore::Double> axInc(imSummary.axisIncrements());
+        casacore::Vector<casacore::String> axUnits(imSummary.axisUnits());
+        for (casacore::uInt i=0; i<axNames.size(); ++i) {
             casacore::String suffix(casacore::String::toString(i+1));
-	    // name = CTYPE
+            // name = CTYPE
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CTYPE"+ suffix);
             *headerEntry->mutable_value() = axNames(i);
             headerEntry->set_entry_type(EntryType::STRING);
-	    // ref val = CRVAL
+            // ref val = CRVAL
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CRVAL"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axRefVal(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
             headerEntry->set_numeric_value(imShape(i));
-	    // increment = CDELT
+            // increment = CDELT
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CDELT"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axInc(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
             headerEntry->set_numeric_value(imShape(i));
-	    // ref pix = CRPIX
+            // ref pix = CRPIX
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CRPIX"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axRefPix(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
             headerEntry->set_numeric_value(imShape(i));
-	    // units = CUNIT
+            // units = CUNIT
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CUNIT"+ suffix);
             *headerEntry->mutable_value() = axUnits(i);
             headerEntry->set_entry_type(EntryType::STRING);
-	}
-	// RESTFRQ
-	casacore::String returnStr;
-	casacore::Quantum<casacore::Double> restFreq;
-	casacore::Bool ok = imSummary.restFrequency(returnStr, restFreq);
-	if (ok) {
+        }
+        // RESTFRQ
+        casacore::String returnStr;
+        casacore::Quantum<casacore::Double> restFreq;
+        casacore::Bool ok = imSummary.restFrequency(returnStr, restFreq);
+        if (ok) {
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("RESTFRQ");
-	    casacore::Double restFreqVal(restFreq.getValue());
+            casacore::Double restFreqVal(restFreq.getValue());
             *headerEntry->mutable_value() = returnStr;
             headerEntry->set_entry_type(EntryType::FLOAT);
             headerEntry->set_numeric_value(restFreqVal);
-	}
-	// SPECSYS
-	casacore::MFrequency::Types freqTypes;
-	ok = imSummary.frequencySystem(returnStr, freqTypes);
-	if (ok) {
+        }
+        // SPECSYS
+        casacore::MFrequency::Types freqTypes;
+        ok = imSummary.frequencySystem(returnStr, freqTypes);
+        if (ok) {
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("SPECSYS");
             *headerEntry->mutable_value() = returnStr;
             headerEntry->set_entry_type(EntryType::STRING);
         }
-	// telescope
+        // telescope
         headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("TELESCOP");
         *headerEntry->mutable_value() = imSummary.telescope();
@@ -347,8 +406,8 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
         headerEntry->set_name("OBSERVER");
         *headerEntry->mutable_value() = imSummary.observer();
         headerEntry->set_entry_type(EntryType::STRING);
-	// obs date
-	casacore::MEpoch epoch;
+        // obs date
+        casacore::MEpoch epoch;
         headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("DATE");
         *headerEntry->mutable_value() = imSummary.obsDate(epoch);
@@ -356,8 +415,8 @@ bool FileExtInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, stri
     } catch (casacore::AipsError& err) {
         if (ccImage != nullptr)
             delete ccImage;
-	message = err.getMesg().c_str();
-	extInfoOK = false;
+        message = err.getMesg().c_str();
+        extInfoOK = false;
     }
     if (ccImage != nullptr)
         delete ccImage;
