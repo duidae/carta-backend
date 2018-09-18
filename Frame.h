@@ -3,33 +3,25 @@
 #include <map>
 #include <string>
 #include <memory>
+
 #include <carta-protobuf/defs.pb.h>
 #include "FileLoader.h"
-
-struct ChannelStats {
-    float minVal;
-    float maxVal;
-    float mean;
-    std::vector<float> percentiles;
-    std::vector<float> percentileRanks;
-    std::vector<int> histogramBins;
-    int64_t nanCount;
-};
+#include "RegionStats.h"
 
 class Frame {
+
 private:
     // setup
     std::string uuid;
     bool valid;
     std::string filename;
+
+    // data components
     std::unique_ptr<carta::FileLoader> loader;
+    std::unique_ptr<carta::RegionStats> stats;
 
     // data shape
-    casacore::IPosition dimensions;
-    size_t width;
-    size_t height;
-    size_t depth;
-    size_t stokes;
+    carta::FileInfo::ImageShape imgShape;
 
     // image view settings
     CARTA::ImageBounds bounds;
@@ -40,9 +32,6 @@ private:
     size_t channelIndex;
     size_t stokesIndex;
     casacore::Matrix<float> channelCache;
-
-    // statistics
-    std::vector<std::vector<ChannelStats>> channelStats;
 
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);
@@ -59,7 +48,5 @@ public:
 
     // data
     std::vector<float> getImageData(bool meanFilter = true);
-
-    // statistics
     CARTA::Histogram currentHistogram();
 };

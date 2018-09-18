@@ -1,6 +1,6 @@
 #include "Frame.h"
-#include <cmath>
 #include "util.h"
+#include <memory>
 
 using namespace carta;
 using namespace std;
@@ -19,8 +19,8 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         loader->openFile(filename, hdu);
         auto &dataSet = loader->loadData(FileInfo::Data::XYZW);
 
-        dimensions = dataSet.shape();
-        size_t ndims = dimensions.size();
+        imgShape.dimensions = dataSet.shape();
+        size_t ndims = imgShape.dimensions.size();
 
         if (ndims < 2 || ndims > 4) {
             log(uuid, "Problem loading file {}: Image must be 2D, 3D or 4D.", filename);
@@ -28,31 +28,32 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
             return;
         }
 
-        log(uuid, "Opening image with dimensions: {}", dimensions);
+        log(uuid, "Opening image with dimensions: {}", imgShape.dimensions);
         // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
         // sendLogEvent(axesInfo, {"file"}, CARTA::ErrorSeverity::DEBUG);
 
         // TBD: use casacore::ImageInterface to get axes
-        width = dimensions[0];
-        height = dimensions[1];
-        depth = (ndims > 2) ? dimensions[2] : 1;
-        stokes = (ndims > 3) ? dimensions[3] : 1;
+        imgShape.width = imgShape.dimensions[0];
+        imgShape.height = imgShape.dimensions[1];
+        imgShape.depth = (ndims > 2) ? imgShape.dimensions[2] : 1;
+        imgShape.stokes = (ndims > 3) ? imgShape.dimensions[3] : 1;
 
+	stats = unique_ptr<RegionStats>(new RegionStats());
         loadStats(false);
 
         // Swizzled data loaded if it exists. Used for Z-profiles and region stats
-        if (dimensions == 3 && loader->hasData(FileInfo::Data::ZYX)) {
+        if (imgShape.dimensions == 3 && loader->hasData(FileInfo::Data::ZYX)) {
             auto &dataSetSwizzled = loader->loadData(FileInfo::Data::ZYX);
             casacore::IPosition swizzledDims = dataSetSwizzled.shape();
-            if (swizzledDims.size() != 3 || swizzledDims[0] != dimensions[2]) {
+            if (swizzledDims.size() != 3 || swizzledDims[0] != imgShape.dimensions[2]) {
                 log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
             } else {
                 log(uuid, "Found valid swizzled data set in file {}.", filename);
             }
-        } else if (dimensions == 4 && loader->hasData(FileInfo::Data::ZYXW)) {
+        } else if (imgShape.dimensions == 4 && loader->hasData(FileInfo::Data::ZYXW)) {
             auto &dataSetSwizzled = loader->loadData(FileInfo::Data::ZYXW);
             casacore::IPosition swizzledDims = dataSetSwizzled.shape();
-            if (swizzledDims.size() != 4 || swizzledDims[1] != dimensions[3]) {
+            if (swizzledDims.size() != 4 || swizzledDims[1] != imgShape.dimensions[3]) {
                 log(uuid, "Invalid swizzled data set in file {}, ignoring.", filename);
             } else {
                 log(uuid, "Found valid swizzled data set in file {}.", filename);
@@ -78,17 +79,17 @@ bool Frame::setChannels(size_t newChannel, size_t newStokes) {
     if (!valid) {
         log(uuid, "No file loaded");
         return false;
-    } else if (newChannel < 0 || newChannel >= depth || newStokes < 0 || newStokes >= stokes) {
+    } else if (newChannel < 0 || newChannel >= imgShape.depth || newStokes < 0 || newStokes >= imgShape.stokes) {
         log(uuid, "Channel {} (stokes {}) is invalid in file {}", newChannel, newStokes, filename);
         return false;
     }
 
-    casacore::IPosition count(2, width, height);
+    casacore::IPosition count(2, imgShape.width, imgShape.height);
     casacore::IPosition start(2, 0, 0);
-    if(dimensions.size() == 3) {
+    if(imgShape.dimensions.size() == 3) {
         count.append(casacore::IPosition(1, 1));
         start.append(casacore::IPosition(1, newChannel));
-    } else if(dimensions.size() == 4) {
+    } else if(imgShape.dimensions.size() == 4) {
         count.append(casacore::IPosition(2, 1, 1));
         start.append(casacore::IPosition(2, newStokes, newChannel));
     }
@@ -113,7 +114,7 @@ bool Frame::setBounds(CARTA::ImageBounds imageBounds, int newMip) {
     const int reqHeight = imageBounds.y_max() - imageBounds.y_min();
     const int reqWidth = imageBounds.x_max() - imageBounds.x_min();
 
-    if (height < y + reqHeight || width < x + reqWidth) {
+    if (imgShape.height < y + reqHeight || imgShape.width < x + reqWidth) {
         return false;
     }
 
@@ -128,279 +129,11 @@ bool Frame::loadStats(bool loadPercentiles) {
         log(uuid, "No file loaded");
         return false;
     }
-
-    channelStats.resize(stokes);
-    for (auto i = 0; i < stokes; i++) {
-        channelStats[i].resize(depth);
-    }
-
-    //TODO: Support multiple HDUs
-    if (loader->hasData(FileInfo::Data::Stats) && loader->hasData(FileInfo::Data::Stats2D)) {
-        if (loader->hasData(FileInfo::Data::S2DMax)) {
-            std::string hdu;
-            auto &dataSet = loader->loadData(FileInfo::Data::S2DMax);
-            casacore::IPosition statDims = dataSet.shape();
-
-            // 2D cubes
-            if (dimensions.size() == 2 && statDims.size() == 0) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                channelStats[0][0].maxVal = *it;
-            } // 3D cubes
-            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < depth; ++i) {
-                    channelStats[0][i].maxVal = *it++;
-                }
-            } // 4D cubes
-            else if (dimensions.size() == 4 && statDims.size() == 2 &&
-                     statDims[0] == stokes && statDims[1] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < stokes; i++) {
-                    for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].maxVal = *it++;
-                    }
-                }
-            } else {
-                log(uuid, "Invalid MaxVals statistics");
-                return false;
-            }
-
-        } else {
-            log(uuid, "Missing MaxVals statistics");
-            return false;
-        }
-
-        if (loader->hasData(FileInfo::Data::S2DMin)) {
-            auto &dataSet = loader->loadData(FileInfo::Data::S2DMin);
-            casacore::IPosition statDims = dataSet.shape();
-
-            // 2D cubes
-            if (dimensions.size() == 2 && statDims.size() == 0) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                channelStats[0][0].maxVal = *it;
-            } // 3D cubes
-            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < depth; ++i) {
-                    channelStats[0][i].maxVal = *it++;
-                }
-            } // 4D cubes
-            else if (dimensions.size() == 4 && statDims.size() == 2 &&
-                     statDims[0] == stokes && statDims[1] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < stokes; i++) {
-                    for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].maxVal = *it++;
-                    }
-                }
-            } else {
-                log(uuid, "Invalid MinVals statistics");
-                return false;
-            }
-
-        } else {
-            log(uuid, "Missing MinVals statistics");
-            return false;
-        }
-
-        if (loader->hasData(FileInfo::Data::S2DMean)) {
-            auto &dataSet = loader->loadData(FileInfo::Data::S2DMean);
-            casacore::IPosition statDims = dataSet.shape();
-
-            // 2D cubes
-            if (dimensions.size() == 2 && statDims.size() == 0) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                channelStats[0][0].maxVal = *it;
-            } // 3D cubes
-            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < depth; ++i) {
-                    channelStats[0][i].maxVal = *it++;
-                }
-            } // 4D cubes
-            else if (dimensions.size() == 4 && statDims.size() == 2 &&
-                     statDims[0] == stokes && statDims[1] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < stokes; i++) {
-                    for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].maxVal = *it++;
-                    }
-                }
-            } else {
-                log(uuid, "Invalid Means statistics");
-                return false;
-            }
-        } else {
-            log(uuid, "Missing Means statistics");
-            return false;
-        }
-
-        if (loader->hasData(FileInfo::Data::S2DNans)) {
-            auto &dataSet = loader->loadData(FileInfo::Data::S2DNans);
-            casacore::IPosition statDims = dataSet.shape();
-
-            // 2D cubes
-            if (dimensions.size() == 2 && statDims.size() == 0) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                channelStats[0][0].maxVal = *it;
-            } // 3D cubes
-            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < depth; ++i) {
-                    channelStats[0][i].maxVal = *it++;
-                }
-            } // 4D cubes
-            else if (dimensions.size() == 4 && statDims.size() == 2 &&
-                     statDims[0] == stokes && statDims[1] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < stokes; i++) {
-                    for (auto j = 0; j < depth; j++) {
-                        channelStats[i][j].maxVal = *it++;
-                    }
-                }
-            } else {
-                log(uuid, "Invalid NaNCounts statistics");
-                return false;
-            }
-        } else {
-            log(uuid, "Missing NaNCounts statistics");
-            return false;
-        }
-
-        if (loader->hasData(FileInfo::Data::S2DHist)) {
-            auto &dataSet = loader->loadData(FileInfo::Data::S2DHist);
-            casacore::IPosition statDims = dataSet.shape();
-            auto numBins = statDims[2];
-
-            // 2D cubes
-            if (dimensions.size() == 2 && statDims.size() == 0) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                std::copy(data.begin(), data.end(),
-                          std::back_inserter(channelStats[0][0].histogramBins));
-            } // 3D cubes
-            else if (dimensions.size() == 3 && statDims.size() == 1 && statDims[0] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < depth; ++i) {
-                    channelStats[0][i].histogramBins.resize(numBins);
-                    for (auto j = 0; j < numBins; j++) {
-                        channelStats[0][i].histogramBins[j] = *it++;
-                    }
-                }
-            } // 4D cubes
-            else if (dimensions.size() == 4 && statDims.size() == 2 &&
-                     statDims[0] == stokes && statDims[1] == depth) {
-                casacore::Array<float> data;
-                dataSet.get(data, true);
-                auto it = data.begin();
-                for (auto i = 0; i < stokes; i++) {
-                    for (auto j = 0; j < depth; j++) {
-                        auto& stats = channelStats[i][j];
-                        stats.histogramBins.resize(numBins);
-                        for (auto k = 0; k < numBins; k++) {
-                            stats.histogramBins[k] = *it++;
-                        }
-                    }
-                }
-            } else {
-                log(uuid, "Invalid histogram statistics");
-                return false;
-            }
-
-        } else {
-            log(uuid, "Missing Histograms group");
-            return false;
-        }
-
-        if (loadPercentiles) {
-            if (loader->hasData(FileInfo::Data::S2DPercent) &&
-                loader->hasData(FileInfo::Data::Ranks)) {
-                auto &dataSetPercentiles = loader->loadData(FileInfo::Data::S2DPercent);
-                auto &dataSetPercentilesRank = loader->loadData(FileInfo::Data::Ranks);
-
-                casacore::IPosition dims = dataSetPercentiles.shape();
-                casacore::IPosition dimsRanks = dataSetPercentilesRank.shape();
-
-                auto numRanks = dimsRanks[0];
-                casacore::Vector<float> ranks(numRanks);
-                dataSetPercentilesRank.get(ranks, false);
-
-                if (dimensions == 2 && dims.size() == 1 && dims[0] == numRanks) {
-                    casacore::Vector<float> vals(numRanks);
-                    dataSetPercentiles.get(vals, true);
-                    vals.tovector(channelStats[0][0].percentiles);
-                    ranks.tovector(channelStats[0][0].percentileRanks);
-                }
-                    // 3D cubes
-                else if (dimensions == 3 && dims.size() == 2 && dims[0] == depth && dims[1] == numRanks) {
-                    casacore::Matrix<float> vals(depth, numRanks);
-                    dataSetPercentiles.get(vals, false);
-
-                    for (auto i = 0; i < depth; i++) {
-                        ranks.tovector(channelStats[0][i].percentileRanks);
-                        channelStats[0][i].percentiles.resize(numRanks);
-                        for (auto j = 0; j < numRanks; j++) {
-                            channelStats[0][i].percentiles[j] = vals(i,j);
-                        }
-                    }
-                }
-                    // 4D cubes
-                else if (dimensions == 4 && dims.size() == 3 && dims[0] == stokes && dims[1] == depth && dims[2] == numRanks) {
-                    casacore::Cube<float> vals(stokes, depth, numRanks);
-                    dataSetPercentiles.get(vals, false);
-
-                    for (auto i = 0; i < stokes; i++) {
-                        for (auto j = 0; j < depth; j++) {
-                            auto& stats = channelStats[i][j];
-                            stats.percentiles.resize(numRanks);
-                            for (auto k = 0; k < numRanks; k++) {
-                                stats.percentiles[k] = vals(i,j,k);
-                            }
-                            ranks.tovector(stats.percentileRanks);
-                        }
-                    }
-                } else {
-                    log(uuid, "Missing Percentiles datasets");
-                    return false;
-                }
-            } else {
-                log(uuid, "Missing Percentiles group");
-                return false;
-            }
-        }
-    } else {
-        log(uuid, "Missing Statistics group");
-        return false;
-    }
-
-    return true;
+    std::string msg;
+    bool statsLoaded = stats->loadStats(loadPercentiles, imgShape, loader, msg);
+    if (!msg.empty())
+        log(uuid, msg);
+    return statsLoaded;
 }
 
 std::vector<float> Frame::getImageData(bool meanFilter) {
@@ -414,7 +147,7 @@ std::vector<float> Frame::getImageData(bool meanFilter) {
     const int reqHeight = bounds.y_max() - bounds.y_min();
     const int reqWidth = bounds.x_max() - bounds.x_min();
 
-    if (height < y + reqHeight || width < x + reqWidth) {
+    if (imgShape.height < y + reqHeight || imgShape.width < x + reqWidth) {
         return std::vector<float>();
     }
 
@@ -457,54 +190,7 @@ std::vector<float> Frame::getImageData(bool meanFilter) {
 }
 
 CARTA::Histogram Frame::currentHistogram() {
-    CARTA::Histogram histogram;
-    histogram.set_channel(channelIndex);
-
-    // Calculate histogram if it hasn't been stored
-    if (channelStats[stokesIndex][channelIndex].histogramBins.empty()) {
-        float minVal = channelCache(0,0);
-        float maxVal = channelCache(0,0);
-        float sum = 0.0f;
-        int count = 0;
-        for (auto i = 0; i < height; i++) {
-            for (auto j = 0; j < width; ++j) {
-                auto v = channelCache(j, i);
-                minVal = fmin(minVal, v);
-                maxVal = fmax(maxVal, v);
-                sum += isnan(v) ? 0.0 : v;
-                count += isnan(v) ? 0 : 1;
-            }
-        }
-
-        ChannelStats& stats = channelStats[stokesIndex][channelIndex];
-        stats.minVal = minVal;
-        stats.maxVal = maxVal;
-        stats.nanCount = count;
-        stats.mean = sum / max(count, 1);
-        int N = int(max(sqrt(width * height), 2.0));
-        stats.histogramBins.resize(N, 0);
-        float binWidth = (stats.maxVal - stats.minVal) / N;
-
-        for (auto i = 0; i < height; i++) {
-            for (auto j = 0; j < width; ++j) {
-                auto v = channelCache(j,i);
-                if (isnan(v)) {
-                    continue;
-                }
-                int bin = max(min((int) ((v - minVal) / binWidth), N - 1), 0);
-                stats.histogramBins[bin]++;
-            }
-        }
-    }
-
-    // Create histogram object
-    auto& currentStats = channelStats[stokesIndex][channelIndex];
-    histogram.set_num_bins(currentStats.histogramBins.size());
-    histogram.set_bin_width((currentStats.maxVal - currentStats.minVal) / currentStats.histogramBins.size());
-    histogram.set_first_bin_center(currentStats.minVal + histogram.bin_width() / 2.0);
-    *histogram.mutable_bins() = {currentStats.histogramBins.begin(), currentStats.histogramBins.end()};
-
-    return histogram;
+    return stats->currentHistogram(channelCache, imgShape, channelIndex, stokesIndex);
 }
 
 CARTA::ImageBounds Frame::currentBounds() {
