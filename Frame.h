@@ -26,7 +26,6 @@ private:
     // image view settings
     CARTA::ImageBounds bounds;
     int mip;
-    bool boundsDefined;
 
     // channel, stokes
     size_t channelIndex;
@@ -44,7 +43,6 @@ public:
     int currentChannel();
     CARTA::ImageBounds currentBounds();
     int currentMip();
-    bool boundsSet();
 
     // data
     std::vector<float> getImageData(bool meanFilter = true);

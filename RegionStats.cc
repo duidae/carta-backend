@@ -9,6 +9,7 @@ using namespace carta;
 using namespace std;
 
 bool RegionStats::loadStats(bool loadPercentiles, FileInfo::ImageShape& imshape, std::unique_ptr<FileLoader>& loader, std::string& message) {
+    m_stats.clear();
     m_stats.resize(imshape.stokes);
     for (auto i = 0; i < imshape.stokes; i++) {
         m_stats[i].resize(imshape.depth);

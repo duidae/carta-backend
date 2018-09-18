@@ -21,3 +21,16 @@ set(SOURCE_FILES main.cc Session.cc FileInfoLoader.cc Frame.cc FileLoader.cc Reg
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
 target_link_libraries(hdf5_image_viewer ${LINK_LIBS})
+
+# Tests
+option(test "Build all tests." OFF)
+if(test)
+  enable_testing()
+  find_package(GTest)
+  include_directories(${GTEST_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR})
+
+  add_executable(testPriorityCtpl test/TestPriorityCtpl.cpp)
+  target_link_libraries(testPriorityCtpl gtest gtest_main Threads::Threads)
+
+  add_test(NAME TestPCtpl COMMAND testPriorityCtpl)
+endif(test)

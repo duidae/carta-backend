@@ -8,7 +8,7 @@
 #include <regex>
 #include <fstream>
 #include <iostream>
-#include "ctpl.h"
+#include "priority_ctpl.h"
 #include "Session.h"
 
 #define MAX_THREADS 4

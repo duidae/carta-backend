@@ -273,8 +273,6 @@ void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
     auto fileId = message.file_id();
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
-        bool isNewImgView(!frame->boundsSet());
-
         // set new view in Frame
         if (!frame->setBounds(message.image_bounds(), message.mip())) {
             // TODO: Error handling on bounds
@@ -285,11 +283,8 @@ void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
         float quality(message.compression_quality());
         setCompression(ctype, quality, numsets);
 
-        CARTA::RegionHistogramData* histogram(nullptr);
-        if (isNewImgView)  // send histogram for new frame img view
-            histogram = getRegionHistogramData(fileId);
-
         // RESPONSE
+        CARTA::RegionHistogramData* histogram = getRegionHistogramData(fileId);
         sendRasterImageData(fileId, requestId, histogram);
     } else {
         // TODO: error handling
@@ -359,7 +354,7 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                 int N = min(numSubsets, MAX_SUBSETS);;
                 for (auto i = 0; i < N; i++) {
                     auto& compressionBuffer = compressionBuffers[i];
-                    futureSizes.push_back(threadPool.push([&nanEncodings, &imageData, &compressionBuffer, numRows, N, rowLength, i, precision](int) {
+                    futureSizes.push_back(threadPool.push(0,0,[&nanEncodings, &imageData, &compressionBuffer, numRows, N, rowLength, i, precision](int) {
                         int subsetRowStart = i * (numRows / N);
                         int subsetRowEnd = (i + 1) * (numRows / N);
                         if (i == N - 1) {

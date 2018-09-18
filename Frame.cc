@@ -120,7 +120,6 @@ bool Frame::setBounds(CARTA::ImageBounds imageBounds, int newMip) {
 
     bounds = imageBounds;
     mip = newMip;
-    boundsDefined = true;
     return true;
 }
 
@@ -207,9 +206,5 @@ int Frame::currentStokes() {
 
 int Frame::currentMip() {
     return mip;
-}
-
-bool Frame::boundsSet() {
-    return boundsDefined;
 }
 
