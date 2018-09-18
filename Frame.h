@@ -5,8 +5,8 @@
 #include <memory>
 
 #include <carta-protobuf/defs.pb.h>
-#include "FileLoader.h"
-#include "RegionStats.h"
+#include "ImageData/FileLoader.h"
+#include "ImageData/RegionStats.h"
 
 class Frame {
 
