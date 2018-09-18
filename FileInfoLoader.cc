@@ -129,29 +129,39 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
             DataSet dataSet = topLevelGroup.openDataSet("DATA");
             vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
             dataSet.getSpace().getSimpleExtentDims(dims.data(), NULL);
-            uint32_t N = dims.size();
-            extendedInfo->set_dimensions(N);
-            if (N < 2 || N > 4) {
+            uint32_t ndims = dims.size();
+            extendedInfo->set_dimensions(ndims);
+            if (ndims < 2 || ndims > 4) {
                 message = "Image must be 2D, 3D or 4D.";
                 return false;
             }
-            extendedInfo->set_width(dims[N - 1]);
-            extendedInfo->set_height(dims[N - 2]);
-            extendedInfo->set_depth((N > 2) ? dims[N - 3] : 1);
-            extendedInfo->set_stokes((N > 3) ? dims[N - 4] : 1);
+            extendedInfo->set_width(dims[ndims - 1]);
+            extendedInfo->set_height(dims[ndims - 2]);
+            extendedInfo->set_depth((ndims > 2) ? dims[ndims - 3] : 1);
+            extendedInfo->set_stokes((ndims > 3) ? dims[ndims - 4] : 1);
 
+            // if in header, save values for computed entries
+            string coordinateTypeX, coordinateTypeY, radeSys;
+
+            // header_entries
             H5O_info_t groupInfo;
             H5Oget_info(topLevelGroup.getId(), &groupInfo);
             for (auto i = 0; i < groupInfo.num_attrs; i++) {
-                Attribute attr = topLevelGroup.openAttribute(i);
-                hid_t attrTypeId = H5Aget_type(attr.getId());
                 auto headerEntry = extendedInfo->add_header_entries();
+                Attribute attr = topLevelGroup.openAttribute(i);
                 headerEntry->set_name(attr.getName());
 
+                hid_t attrTypeId = H5Aget_type(attr.getId());
                 auto typeClass = H5Tget_class(attrTypeId);
                 if (typeClass == H5T_STRING) {
                     attr.read(attr.getStrType(), *headerEntry->mutable_value());
                     headerEntry->set_entry_type(EntryType::STRING);
+                    if (headerEntry->name() == "CTYPE1") 
+                        coordinateTypeX = headerEntry->value();
+                    else if (headerEntry->name() == "CTYPE2")
+                        coordinateTypeY = headerEntry->value();
+                    else if (headerEntry->name() == "RADESYS") 
+                        radeSys = headerEntry->value();
                 } else if (typeClass == H5T_INTEGER) {
                     int64_t valueInt;
                     DataType intType(PredType::NATIVE_INT64);
@@ -168,6 +178,8 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
                     *headerEntry->mutable_value() = fmt::format("{:f}", numericValue);
                 }
             }
+            // computed_entries
+            addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys);
         } else {
             message = "File is missing DATA dataset";
             extInfoOK = false;
@@ -207,6 +219,10 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
             extendedInfo->set_stokes(1);
         }
         extendedInfo->add_stokes_vals(""); // not in header
+
+        // if in header, save values for computed entries
+        string coordinateTypeX, coordinateTypeY, radeSys;
+
         // set header entries 
         for (casacore::uInt field=0; field < hduEntries.nfields(); ++field) {
             casacore::String name = hduEntries.name(field);
@@ -218,6 +234,12 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
                     case casacore::TpString: {
                         *headerEntry->mutable_value() = hduEntries.asString(field);
                         headerEntry->set_entry_type(EntryType::STRING);
+			if (headerEntry->name() == "CTYPE1") 
+                            coordinateTypeX = headerEntry->value();
+                        else if (headerEntry->name() == "CTYPE2")
+                            coordinateTypeY = headerEntry->value();
+                        else if (headerEntry->name() == "RADESYS") 
+                            radeSys = headerEntry->value();
                         break;
                     }
                     case casacore::TpInt: {
@@ -240,6 +262,8 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
                 }
             }
         }
+        // computed_entries
+        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys);
     } catch (casacore::AipsError& err) {
         message = err.getMesg();
         extInfoOK = false;
@@ -278,6 +302,10 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         extendedInfo->set_depth(dim > 2 ? imShape(2) : 1);
         extendedInfo->set_stokes(dim > 3 ? imShape(3) : 1);
         extendedInfo->add_stokes_vals(""); // not in header
+
+        // if in header, save values for computed entries
+        string coordinateTypeX, coordinateTypeY, radeSys;
+
         // set dims in header entries
         auto headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("NAXIS");
@@ -349,8 +377,15 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             // name = CTYPE
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CTYPE"+ suffix);
-            *headerEntry->mutable_value() = axNames(i);
             headerEntry->set_entry_type(EntryType::STRING);
+	    casacore::String axisName = axNames(i);
+	    if (axisName == "Right Ascension") axisName = "RA";
+	    if (axisName == "Declination") axisName = "DEC";
+            *headerEntry->mutable_value() = axisName;
+	    if (suffix=="1")
+                coordinateTypeX = axisName;
+	    else if (suffix=="2")
+                coordinateTypeY = axisName;
             // ref val = CRVAL
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CRVAL"+ suffix);
@@ -396,6 +431,16 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             *headerEntry->mutable_value() = returnStr;
             headerEntry->set_entry_type(EntryType::STRING);
         }
+        // RADESYS
+        casacore::MDirection::Types dirTypes;
+        ok = imSummary.directionSystem(returnStr, dirTypes);
+        if (ok) {
+            headerEntry = extendedInfo->add_header_entries();
+            headerEntry->set_name("RADESYS");
+            *headerEntry->mutable_value() = returnStr;
+            headerEntry->set_entry_type(EntryType::STRING);
+	    radeSys = returnStr;
+        }
         // telescope
         headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("TELESCOP");
@@ -412,6 +457,9 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         headerEntry->set_name("DATE");
         *headerEntry->mutable_value() = imSummary.obsDate(epoch);
         headerEntry->set_entry_type(EntryType::STRING);
+
+        // computed_entries
+        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys);
     } catch (casacore::AipsError& err) {
         if (ccImage != nullptr)
             delete ccImage;
@@ -421,4 +469,52 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
     if (ccImage != nullptr)
         delete ccImage;
     return extInfoOK;
+}
+
+void FileInfoLoader::addComputedEntries(CARTA::FileInfoExtended* extendedInfo, const std::string& coordinateTypeX,
+    const std::string& coordinateTypeY, const std::string& radeSys) {
+    // computed_entries
+    auto computedEntryName = extendedInfo->add_computed_entries();
+
+    // name
+    casacore::File ccfile(m_file);
+    string name(ccfile.path().baseName());
+    computedEntryName->set_name("Name");
+    computedEntryName->set_entry_type(EntryType::STRING);
+    computedEntryName->set_value(name);
+
+    // shape
+    auto computedEntryShape = extendedInfo->add_computed_entries();
+    computedEntryShape->set_name("Shape");
+    computedEntryShape->set_entry_type(EntryType::STRING);
+    string shapeString;
+    int ndims(extendedInfo->dimensions());
+    switch(ndims) {
+        case 2:
+            shapeString = fmt::format("[{}, {}]", extendedInfo->width(), extendedInfo->height());
+            break;
+        case 3:
+            shapeString = fmt::format("[{}, {}, {}]", extendedInfo->width(), extendedInfo->height(),
+                extendedInfo->depth());
+            break;
+        case 4:
+            shapeString = fmt::format("[{}, {}, {}, {}]", extendedInfo->width(), extendedInfo->height(),
+                extendedInfo->depth(), extendedInfo->stokes());
+            break;
+    }
+    computedEntryShape->set_value(shapeString);
+
+    if (coordinateTypeX.length() && coordinateTypeY.length()) {
+        auto computedEntryCoordinateType = extendedInfo->add_computed_entries();
+        computedEntryCoordinateType->set_name("Coordinate type");
+        computedEntryCoordinateType->set_entry_type(EntryType::STRING);
+        computedEntryCoordinateType->set_value(fmt::format("{}, {}", coordinateTypeX, coordinateTypeY));
+    }
+
+    if (radeSys.length()) {
+        auto computedEntryCelestialFrame = extendedInfo->add_computed_entries();
+        computedEntryCelestialFrame->set_name("Celestial frame");
+        computedEntryCelestialFrame->set_entry_type(EntryType::STRING);
+        computedEntryCelestialFrame->set_value(radeSys);
+    }
 }
