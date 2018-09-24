@@ -19,14 +19,6 @@ enum class Data : uint32_t {
     Stats, Stats2D, S2DMin, S2DMax, S2DMean, S2DNans, S2DHist, S2DPercent, Ranks,
 };
 
-struct ImageShape {
-    casacore::IPosition dimensions;
-    size_t width;
-    size_t height;
-    size_t depth;
-    size_t stokes;
-    };
-
 inline casacore::ImageOpener::ImageTypes fileType(const std::string &file) {
      return casacore::ImageOpener::imageType(file);
 }

@@ -4,6 +4,7 @@
 
 #include <carta-protobuf/raster_image.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
+#include <carta-protobuf/spatial_profile.pb.h>
 #include <carta-protobuf/error.pb.h>
 
 #include <casacore/casa/OS/Path.h>
@@ -24,7 +25,10 @@ Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, map<s
 }
 
 Session::~Session() {
-
+    for (auto& frame : frames) {
+        frame.second.reset();
+    }
+    frames.clear();
 }
 
 bool Session::checkPermissionForEntry(string entry) {
@@ -174,13 +178,14 @@ bool Session::fillExtendedFileInfo(FileInfoExtended* extendedInfo, FileInfo* fil
 CARTA::RegionHistogramData* Session::getRegionHistogramData(const int32_t fileId, const int32_t regionId) {
     RegionHistogramData* histogramMessage(nullptr);
     if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
         histogramMessage = new RegionHistogramData();
         histogramMessage->set_file_id(fileId);
-        // default -1 corresponds to the entire current XY plane
         histogramMessage->set_region_id(regionId);
-        auto& frame = frames[fileId];
         histogramMessage->set_stokes(frame->currentStokes());
-        histogramMessage->mutable_histograms()->AddAllocated(new Histogram(frames[fileId]->currentHistogram()));
+	std::vector<CARTA::Histogram> histograms(frame->getRegionHistograms(regionId));
+	for (auto& histogram : histograms)
+            histogramMessage->mutable_histograms()->AddAllocated(new Histogram(histogram));
     }
     return histogramMessage;
 }
@@ -284,8 +289,8 @@ void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
         setCompression(ctype, quality, numsets);
 
         // RESPONSE
-        CARTA::RegionHistogramData* histogram = getRegionHistogramData(fileId);
-        sendRasterImageData(fileId, requestId, histogram);
+        CARTA::RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
+        sendRasterImageData(fileId, requestId, histogramData);
     } else {
         // TODO: error handling
     }
@@ -296,17 +301,54 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
     auto fileId(message.file_id());
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
-        if (!frame->setChannels(message.channel(), message.stokes())) {
+        if (frame->setImageChannels(message.channel(), message.stokes())) {
+            // Send updated histogram
+            RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
+            // Histogram message now managed by the image data object
+            sendRasterImageData(fileId, requestId, histogramData);
+        } else {
             // TODO: Error handling on bounds
         }
-        // Send updated histogram
-        RegionHistogramData* histogramData = getRegionHistogramData(fileId);
-        // Histogram message now managed by the image data object
-        sendRasterImageData(fileId, requestId, histogramData);
     } else {
         // TODO: error handling
     }
 }
+
+/*
+void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+	frame->createCursorRegion(CURSOR_REGION_ID, message.point());
+        if (message.has_spatial_requirements()) {
+            onSetSpatialRequirements(message.spatial_requirements(), requestId);
+        } else {
+            sendSpatialProfileData(fileId, CURSOR_REGION_ID);
+        }
+    } else {
+        // TODO: error handling
+    }
+}
+
+void Session::onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        auto regionId(message.region_id());
+        int nprofiles(message.spatial_profiles_size());
+        vector<string> spatialProfiles;
+        for (int i=0; i<nprofiles; ++i) {
+            spatialProfiles.push_back(message.spatial_profiles(i));
+        }
+        if (frame->setRegionSpatialRequirements(regionId, spatialProfiles))
+            sendSpatialProfileData(fileId, regionId);
+    } else {
+        // TODO: error handling
+    }
+}
+*/
+
+// ******** SEND DATA STREAMS *********
 
 void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram) {
     RasterImageData rasterImageData;
@@ -331,7 +373,7 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
             rasterImageData.mutable_image_bounds()->set_y_min(imageBounds.y_min());
             rasterImageData.mutable_image_bounds()->set_y_max(imageBounds.y_max());
 
-	    auto compressionType = compressionSettings.type;
+            auto compressionType = compressionSettings.type;
             if (compressionType == CompressionType::NONE) {
                 rasterImageData.set_compression_type(CompressionType::NONE);
                 rasterImageData.set_compression_quality(0);
@@ -345,7 +387,7 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                 rasterImageData.set_compression_quality(precision);
 
                 auto numSubsets(compressionSettings.nsubsets);
-		vector<char> compressionBuffers[numSubsets];
+                vector<char> compressionBuffers[numSubsets];
                 vector<size_t> compressedSizes(numSubsets);
                 vector<vector<int32_t>> nanEncodings(numSubsets);
                 vector<future<size_t>> futureSizes;
@@ -402,6 +444,47 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
         }
     }
 }
+
+/*
+void Session::sendSpatialProfileData(int fileId, int regionId) {
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        SpatialProfileData spatialProfileData;
+        spatialProfileData.set_file_id(fileId);
+        spatialProfileData.set_region_id(regionId);
+        casacore::IPosition params(frame->getRegionProfileParams(regionId));
+        for (unsigned int i=0; i<params.size(); ++i) {
+            switch (i) {
+                case 0:
+                    spatialProfileData.set_x(params(0));
+                    break;
+                case 1:
+                    spatialProfileData.set_y(params(1));
+                    break;
+                case 2:
+                    spatialProfileData.set_channel(params(2));
+                    break;
+                case 3:
+                    spatialProfileData.set_stokes(params(3));
+                    break;
+                case 4:
+                    spatialProfileData.set_value(params(4));
+                    break;
+            }
+        }
+        // load profiles
+        std::vector<CARTA::SpatialProfile> profiles = frame->getRegionSpatialProfiles(regionId);
+        if (!profiles.empty()) {
+            for (auto profile : profiles) {
+                auto newProfile = spatialProfileData.add_profiles();
+                newProfile->CopyFrom(profile);
+            }
+            // Send required profiles
+            sendEvent("SPATIAL_PROFILE_DATA", 0, spatialProfileData);
+        }
+    }
+}
+*/
 
 // *********************************************************************************
 // SEND uWEBSOCKET MESSAGES

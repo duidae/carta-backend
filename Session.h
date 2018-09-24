@@ -15,11 +15,13 @@
 #include <carta-protobuf/file_list.pb.h>
 #include <carta-protobuf/file_info.pb.h>
 #include <carta-protobuf/open_file.pb.h>
+#include <carta-protobuf/close_file.pb.h>
 #include <carta-protobuf/set_image_view.pb.h>
 #include <carta-protobuf/set_image_channels.pb.h>
-#include <carta-protobuf/close_file.pb.h>
-#include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/raster_image.pb.h>
+#include <carta-protobuf/region_histogram.pb.h>
+#include <carta-protobuf/set_cursor.pb.h>
+#include <carta-protobuf/region_requirements.pb.h>
 
 #include "compression.h"
 #include "priority_ctpl.h"
@@ -50,7 +52,6 @@ protected:
     bool verboseLogging;
 
     // <file_id, Frame>: one frame per image file
-    // TODO: clean up frames on session delete
     std::map<int, std::unique_ptr<Frame>> frames;
 
     // for data compression
@@ -75,6 +76,8 @@ public:
     void onCloseFile(const CARTA::CloseFile& message, uint32_t requestId);
     void onSetImageView(const CARTA::SetImageView& message, uint32_t requestId);
     void onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId);
+    //void onSetCursor(const CARTA::SetCursor& message, uint32_t requestId);
+    //void onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId);
 
 protected:
     // ICD: File list response
@@ -84,14 +87,15 @@ protected:
 
     // ICD: File info response
     bool fillFileInfo(CARTA::FileInfo* fileInfo, const std::string& filename);
-    CARTA::FileType convertFileType(int ccImageType);
-    bool getHduList(CARTA::FileInfo* fileInfo, casacore::String filename);
     bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo,
         const std::string folder, const std::string filename, std::string hdu, std::string& message);
 
     // ICD: Send raster image data, optionally with histogram
     void sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
     CARTA::RegionHistogramData* getRegionHistogramData(const int32_t fileId, const int32_t regionId=-1);
+
+    // ICD: Send spatial profile data
+    //void sendSpatialProfileData(int fileId, int regionId);
 
     // data compression
     void setCompression(CARTA::CompressionType type, float quality, int nsubsets);

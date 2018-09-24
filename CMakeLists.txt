@@ -17,6 +17,7 @@ INCLUDE_DIRECTORIES(${HDF5_INCLUDE_DIR})
 ADD_SUBDIRECTORY(carta-protobuf)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR}/ImageData)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR}/Region)
 set(LINK_LIBS ${LINK_LIBS} carta-protobuf ${PROTOBUF_LIBRARY} fmt hdf5_serial hdf5_cpp hdf5_hl_cpp uWS ssl crypto z zfp casa_casa casa_coordinates casa_tables casa_images casa_lattices casa_fits casa_measures casa_scimath ${Boost_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
 set(SOURCE_FILES
   main.cc
@@ -25,7 +26,8 @@ set(SOURCE_FILES
   Frame.cc
   compression.cc
   ImageData/FileLoader.cc
-  ImageData/RegionStats.cc)
+  Region/Region.cc
+  Region/RegionStats.cc)
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
 target_link_libraries(hdf5_image_viewer ${LINK_LIBS})
