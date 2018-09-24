@@ -24,7 +24,6 @@
 #include <carta-protobuf/raster_image.pb.h>
 
 #include "compression.h"
-#include "priority_ctpl.h"
 #include "Frame.h"
 
 #define MAX_SUBSETS 8
@@ -55,8 +54,10 @@ protected:
     // TODO: clean up frames on session delete
     std::unordered_map<int, std::unique_ptr<Frame>> frames;
 
+    // Notification mechanism when outgoing messages are ready
+    uS::Async outgoing;
+
     // for data compression
-    ctpl::thread_pool& threadPool;
     CompressionSettings compressionSettings;
 
     // Return message queue
@@ -68,9 +69,9 @@ public:
             std::unordered_map<std::string, std::vector<std::string>>& permissionsMap,
             bool enforcePermissions,
             std::string folder,
-            ctpl::thread_pool& serverThreadPool,
+            uS::Async outgoing,
             bool verbose = false);
-    ~Session();
+    ~Session() = default;
 
     // CARTA ICD
     void onRegisterViewer(const CARTA::RegisterViewer& message, uint32_t requestId);

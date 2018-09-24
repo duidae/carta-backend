@@ -23,6 +23,7 @@ namespace po = boost::program_options;
 unordered_map<WebSocket<SERVER>*, Session*> sessions;
 unordered_map<string, vector<string>> permissionsMap;
 boost::uuids::random_generator uuid_gen;
+Hub h;
 
 string baseFolder = "./";
 bool verbose = false;
@@ -69,7 +70,14 @@ string getEventName(char* rawMessage) {
 
 // Called on connection. Creates session object and assigns UUID and API keys to it
 void onConnect(WebSocket<SERVER>* ws, HttpRequest httpRequest) {
-    sessions[ws] = new Session(ws, uuid_gen(), permissionsMap, usePermissions, baseFolder, threadPool, verbose);
+    uS::Async outgoing(h.getLoop());
+    outgoing.start(
+        [](uS::Async*) -> void {
+            for(auto &s : sessions) {
+                s.second->sendPendingMessages();
+            }
+        });
+    sessions[ws] = new Session(ws, uuid_gen(), permissionsMap, usePermissions, baseFolder, outgoing, verbose);
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
@@ -212,33 +220,15 @@ int main(int argc, const char* argv[]) {
         }
 
         // Construct task scheduler
-        //tbb::task_scheduler_init task_sched;
+        tbb::task_scheduler_init task_sched;
 
-        Hub h;
         h.onMessage(&onMessage);
         h.onConnection(&onConnect);
         h.onDisconnection(&onDisconnect);
         if (h.listen(port)) {
             h.getDefaultGroup<uWS::SERVER>().startAutoPing(5000);
             fmt::print("Listening on port {} with data folder {} and {} threads in thread pool\n", port, baseFolder, threadCount);
-            // uS::Async outgoing(h.getLoop());
-            // outgoing.start(
-            //     [](uS::Async*) -> void {
-            //         for(auto &s : sessions) {
-            //             s.second->sendPendingMessages();
-            //         }
-            //     });
-            // h.run();
-            while(true) {
-                auto loop = h.getLoop();
-                loop->timepoint = std::chrono::system_clock::now();
-                if(loop->numPolls) {
-                    loop->doEpoll(50);
-                }
-                for(auto &s : sessions) {
-                    s.second->sendPendingMessages();
-                }
-            }
+            h.run();
         } else {
             fmt::print("Error listening on port {}\n", port);
             return 1;

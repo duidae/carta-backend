@@ -15,18 +15,14 @@ using namespace std;
 using namespace CARTA;
 
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
-Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, ctpl::thread_pool& serverThreadPool, bool verbose)
+Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async outgoing, bool verbose)
     : uuid(uuid),
       socket(ws),
       permissionsMap(permissionsMap),
       permissionsEnabled(enforcePermissions),
       baseFolder(folder),
       verboseLogging(verbose),
-      threadPool(serverThreadPool) {
-}
-
-Session::~Session() {
-
+      outgoing(outgoing) {
 }
 
 bool Session::checkPermissionForEntry(string entry) {
@@ -350,7 +346,6 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
 		vector<char> compressionBuffers[numSubsets];
                 vector<size_t> compressedSizes(numSubsets);
                 vector<vector<int32_t>> nanEncodings(numSubsets);
-                vector<future<size_t>> futureSizes;
 
                 auto N = min(numSubsets, MAX_SUBSETS);
                 auto range = tbb::blocked_range<int>(0, N);
@@ -409,6 +404,7 @@ void Session::sendEvent(string eventName, u_int64_t eventId, google::protobuf::M
     memcpy(msg.data() + eventNameLength, &eventId, 4);
     message.SerializeToArray(msg.data() + eventNameLength + 8, messageLength);
     out_msgs.push(msg);
+    outgoing.send();
     //socket->send(msg.data(), msg.size(), uWS::BINARY);
 }
 
