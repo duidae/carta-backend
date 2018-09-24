@@ -10,18 +10,20 @@
 #include <casacore/casa/OS/Path.h>
 #include <casacore/casa/OS/DirectoryIterator.h>
 
+#include <tbb/tbb.h>
+
 using namespace std;
 using namespace CARTA;
 
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
-Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, ctpl::thread_pool& serverThreadPool, bool verbose)
+Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async outgoing, bool verbose)
     : uuid(uuid),
       socket(ws),
       permissionsMap(permissionsMap),
       permissionsEnabled(enforcePermissions),
       baseFolder(folder),
       verboseLogging(verbose),
-      threadPool(serverThreadPool) {
+      outgoing(outgoing) {
 }
 
 Session::~Session() {
@@ -267,6 +269,9 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
 void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
     auto id = message.file_id();
     if (id == -1) {
+        for (auto& frame : frames) {
+            frame.second.reset();
+        }
         frames.clear();
     } else if (frames.count(id)) {
         frames[id].reset();
@@ -314,39 +319,7 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
     }
 }
 
-/*
-void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
-    auto fileId(message.file_id());
-    if (frames.count(fileId)) {
-        auto& frame = frames[fileId];
-	frame->createCursorRegion(CURSOR_REGION_ID, message.point());
-        if (message.has_spatial_requirements()) {
-            onSetSpatialRequirements(message.spatial_requirements(), requestId);
-        } else {
-            sendSpatialProfileData(fileId, CURSOR_REGION_ID);
-        }
-    } else {
-        // TODO: error handling
-    }
-}
 
-void Session::onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId) {
-    auto fileId(message.file_id());
-    if (frames.count(fileId)) {
-        auto& frame = frames[fileId];
-        auto regionId(message.region_id());
-        int nprofiles(message.spatial_profiles_size());
-        vector<string> spatialProfiles;
-        for (int i=0; i<nprofiles; ++i) {
-            spatialProfiles.push_back(message.spatial_profiles(i));
-        }
-        if (frame->setRegionSpatialRequirements(regionId, spatialProfiles))
-            sendSpatialProfileData(fileId, regionId);
-    } else {
-        // TODO: error handling
-    }
-}
-*/
 
 // ******** SEND DATA STREAMS *********
 
@@ -390,13 +363,11 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                 vector<char> compressionBuffers[numSubsets];
                 vector<size_t> compressedSizes(numSubsets);
                 vector<vector<int32_t>> nanEncodings(numSubsets);
-                vector<future<size_t>> futureSizes;
 
-                auto tStartCompress = chrono::high_resolution_clock::now();
-                int N = min(numSubsets, MAX_SUBSETS);;
-                for (auto i = 0; i < N; i++) {
-                    auto& compressionBuffer = compressionBuffers[i];
-                    futureSizes.push_back(threadPool.push(0,0,[&nanEncodings, &imageData, &compressionBuffer, numRows, N, rowLength, i, precision](int) {
+                auto N = min(numSubsets, MAX_SUBSETS);
+                auto range = tbb::blocked_range<int>(0, N);
+                auto loop = [&](const tbb::blocked_range<int> &r) {
+                    for(int i = r.begin(); i != r.end(); ++i) {
                         int subsetRowStart = i * (numRows / N);
                         int subsetRowEnd = (i + 1) * (numRows / N);
                         if (i == N - 1) {
@@ -404,20 +375,12 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                         }
                         int subsetElementStart = subsetRowStart * rowLength;
                         int subsetElementEnd = subsetRowEnd * rowLength;
-
-                        size_t compressedSize;
-                        // nanEncodings[i] = getNanEncodingsSimple(imageData, subsetElementStart, subsetElementEnd - subsetElementStart);
                         nanEncodings[i] = getNanEncodingsBlock(imageData, subsetElementStart, rowLength, subsetRowEnd - subsetRowStart);
-                        compress(imageData, subsetElementStart, compressionBuffer, compressedSize, rowLength, subsetRowEnd - subsetRowStart, precision);
-                        return compressedSize;
-                    }));
-                }
-
-                // Wait for completed compression threads
-                for (auto i = 0; i < numSubsets; i++) {
-                    compressedSizes[i] = futureSizes[i].get();
-
-                }
+                        compress(imageData, subsetElementStart, compressionBuffers[i], compressedSizes[i], rowLength, subsetRowEnd - subsetRowStart, precision);
+                    }
+                };
+                auto tStartCompress = chrono::high_resolution_clock::now();
+                tbb::parallel_for(range, loop);
                 auto tEndCompress = chrono::high_resolution_clock::now();
                 auto dtCompress = chrono::duration_cast<chrono::microseconds>(tEndCompress - tStartCompress).count();
 
@@ -445,63 +408,31 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
     }
 }
 
-/*
-void Session::sendSpatialProfileData(int fileId, int regionId) {
-    if (frames.count(fileId)) {
-        auto& frame = frames[fileId];
-        SpatialProfileData spatialProfileData;
-        spatialProfileData.set_file_id(fileId);
-        spatialProfileData.set_region_id(regionId);
-        casacore::IPosition params(frame->getRegionProfileParams(regionId));
-        for (unsigned int i=0; i<params.size(); ++i) {
-            switch (i) {
-                case 0:
-                    spatialProfileData.set_x(params(0));
-                    break;
-                case 1:
-                    spatialProfileData.set_y(params(1));
-                    break;
-                case 2:
-                    spatialProfileData.set_channel(params(2));
-                    break;
-                case 3:
-                    spatialProfileData.set_stokes(params(3));
-                    break;
-                case 4:
-                    spatialProfileData.set_value(params(4));
-                    break;
-            }
-        }
-        // load profiles
-        std::vector<CARTA::SpatialProfile> profiles = frame->getRegionSpatialProfiles(regionId);
-        if (!profiles.empty()) {
-            for (auto profile : profiles) {
-                auto newProfile = spatialProfileData.add_profiles();
-                newProfile->CopyFrom(profile);
-            }
-            // Send required profiles
-            sendEvent("SPATIAL_PROFILE_DATA", 0, spatialProfileData);
-        }
-    }
-}
-*/
 
 // *********************************************************************************
 // SEND uWEBSOCKET MESSAGES
 
 // Sends an event to the client with a given event name (padded/concatenated to 32 characters) and a given ProtoBuf message
 void Session::sendEvent(string eventName, u_int64_t eventId, google::protobuf::MessageLite& message) {
-    size_t eventNameLength = 32;
+    static const size_t eventNameLength = 32;
     int messageLength = message.ByteSize();
     size_t requiredSize = eventNameLength + 8 + messageLength;
-    if (binaryPayloadCache.size() < requiredSize) {
-        binaryPayloadCache.resize(requiredSize);
+    std::vector<char> msg(requiredSize, 0);
+    std::copy_n(eventName.begin(), min(eventName.length(), eventNameLength), msg.begin());
+    memcpy(msg.data() + eventNameLength, &eventId, 4);
+    message.SerializeToArray(msg.data() + eventNameLength + 8, messageLength);
+    out_msgs.push(msg);
+    outgoing.send();
+    //socket->send(msg.data(), msg.size(), uWS::BINARY);
+}
+
+void Session::sendPendingMessages() {
+    // Do not parallelize: this must be done serially
+    // due to the constraints of uWS.
+    std::vector<char> msg;
+    while(out_msgs.try_pop(msg)) {
+        socket->send(msg.data(), msg.size(), uWS::BINARY);
     }
-    memset(binaryPayloadCache.data(), 0, eventNameLength);
-    memcpy(binaryPayloadCache.data(), eventName.c_str(), min(eventName.length(), eventNameLength));
-    memcpy(binaryPayloadCache.data() + eventNameLength, &eventId, 4);
-    message.SerializeToArray(binaryPayloadCache.data() + eventNameLength + 8, messageLength);
-    socket->send(binaryPayloadCache.data(), requiredSize, uWS::BINARY);
 }
 
 void Session::sendLogEvent(std::string message, std::vector<std::string> tags, CARTA::ErrorSeverity severity) {
