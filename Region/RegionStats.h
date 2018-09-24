@@ -8,8 +8,7 @@
 #include <casacore/casa/Arrays/IPosition.h>
 
 #include <vector>
-#include <map>
-//#include <memory>
+#include <unordered_map>
 
 namespace carta {
 
@@ -25,7 +24,7 @@ public:
 
 private:
     size_t m_stokes;
-    std::map<int, CARTA::Histogram> m_channelHistograms;
+    std::unordered_map<int, CARTA::Histogram> m_channelHistograms;
     std::vector<CARTA::SetHistogramRequirements_HistogramConfig> m_configs;
 };
 

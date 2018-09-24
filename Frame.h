@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <memory>
 
@@ -49,7 +49,7 @@ private:
 
     // Region
     // <region_id, Region>: one Region per ID
-    std::map<int, std::unique_ptr<carta::Region>> regions;
+    std::unordered_map<int, std::unique_ptr<carta::Region>> regions;
 
     bool loadImageChannelStats(bool loadPercentiles = false);
     void setImageRegion(); // set region for entire image
