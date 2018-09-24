@@ -8,6 +8,9 @@
 #include <regex>
 #include <fstream>
 #include <iostream>
+#include <tbb/cache_aligned_allocator.h>
+#include <tbb/task.h>
+#include <tbb/task_scheduler_init.h>
 #include "priority_ctpl.h"
 #include "Session.h"
 
@@ -17,8 +20,8 @@ using namespace std;
 using namespace uWS;
 namespace po = boost::program_options;
 
-map<WebSocket<SERVER>*, Session*> sessions;
-map<string, vector<string>> permissionsMap;
+unordered_map<WebSocket<SERVER>*, Session*> sessions;
+unordered_map<string, vector<string>> permissionsMap;
 boost::uuids::random_generator uuid_gen;
 
 string baseFolder = "./";
@@ -88,6 +91,64 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
     fmt::print("Client {} [{}] Disconnected ({}). Remaining clients: {}\n", boost::uuids::to_string(uuid), ws->getAddress().address, timeString, sessions.size());
 }
 
+class OnMessageTask : public tbb::task {
+    Session *session;
+    string eventName;
+    uint32_t requestId;
+    std::vector<char> eventPayload;
+
+    tbb::task* execute() {
+        //CARTA ICD
+        if (eventName == "REGISTER_VIEWER") {
+            CARTA::RegisterViewer message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onRegisterViewer(message, requestId);
+            }
+        } else if (eventName == "FILE_LIST_REQUEST") {
+            CARTA::FileListRequest message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onFileListRequest(message, requestId);
+            }
+        } else if (eventName == "FILE_INFO_REQUEST") {
+            CARTA::FileInfoRequest message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onFileInfoRequest(message, requestId);
+            }
+        } else if (eventName == "OPEN_FILE") {
+            CARTA::OpenFile message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onOpenFile(message, requestId);
+            }
+        } else if (eventName == "CLOSE_FILE") {
+            CARTA::CloseFile message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onCloseFile(message, requestId);
+            }
+        } else if (eventName == "SET_IMAGE_VIEW") {
+            CARTA::SetImageView message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onSetImageView(message, requestId);
+            }
+        } else if (eventName == "SET_IMAGE_CHANNELS") {
+            CARTA::SetImageChannels message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onSetImageChannels(message, requestId);
+            }
+        } else {
+            fmt::print("Unknown event type {}\n", eventName);
+        }
+        return nullptr;
+    }
+
+public:
+    OnMessageTask(Session *session_, char *rawMessage_, size_t length_)
+        : session(session_),
+          eventName(getEventName(rawMessage_)),
+          requestId(*reinterpret_cast<uint32_t*>(rawMessage_+32)),
+          eventPayload(&rawMessage_[36], &rawMessage_[length_])
+    {}
+};
+
 // Forward message requests to session callbacks after parsing message into relevant ProtoBuf message
 void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode opCode) {
     auto session = sessions[ws];
@@ -99,50 +160,8 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
 
     if (opCode == OpCode::BINARY) {
         if (length > 36) {
-            string eventName = getEventName(rawMessage);
-            uint32_t requestId = *((uint32_t*) (rawMessage + 32));
-            void* eventPayload = rawMessage + 36;
-            int payloadSize = (int) length - 36;
-
-            //CARTA ICD
-            if (eventName == "REGISTER_VIEWER") {
-                CARTA::RegisterViewer message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onRegisterViewer(message, requestId);
-                }
-            } else if (eventName == "FILE_LIST_REQUEST") {
-                CARTA::FileListRequest message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onFileListRequest(message, requestId);
-                }
-            } else if (eventName == "FILE_INFO_REQUEST") {
-                CARTA::FileInfoRequest message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onFileInfoRequest(message, requestId);
-                }
-            } else if (eventName == "OPEN_FILE") {
-                CARTA::OpenFile message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onOpenFile(message, requestId);
-                }
-            } else if (eventName == "CLOSE_FILE") {
-                CARTA::CloseFile message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onCloseFile(message, requestId);
-                }
-            } else if (eventName == "SET_IMAGE_VIEW") {
-                CARTA::SetImageView message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onSetImageView(message, requestId);
-                }
-            } else if (eventName == "SET_IMAGE_CHANNELS") {
-                CARTA::SetImageChannels message;
-                if (message.ParseFromArray(eventPayload, payloadSize)) {
-                    session->onSetImageChannels(message, requestId);
-                }
-            } else {
-                fmt::print("Unknown event type {}\n", eventName);
-            }
+            OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(session, rawMessage, length);
+            tbb::task::enqueue(*omt, tbb::priority_high);
         }
     } else {
         fmt::print("Invalid event type\n");
@@ -192,6 +211,9 @@ int main(int argc, const char* argv[]) {
             readPermissions("permissions.txt");
         }
 
+        // Construct task scheduler
+        //tbb::task_scheduler_init task_sched;
+
         Hub h;
         h.onMessage(&onMessage);
         h.onConnection(&onConnect);
@@ -199,7 +221,24 @@ int main(int argc, const char* argv[]) {
         if (h.listen(port)) {
             h.getDefaultGroup<uWS::SERVER>().startAutoPing(5000);
             fmt::print("Listening on port {} with data folder {} and {} threads in thread pool\n", port, baseFolder, threadCount);
-            h.run();
+            // uS::Async outgoing(h.getLoop());
+            // outgoing.start(
+            //     [](uS::Async*) -> void {
+            //         for(auto &s : sessions) {
+            //             s.second->sendPendingMessages();
+            //         }
+            //     });
+            // h.run();
+            while(true) {
+                auto loop = h.getLoop();
+                loop->timepoint = std::chrono::system_clock::now();
+                if(loop->numPolls) {
+                    loop->doEpoll(50);
+                }
+                for(auto &s : sessions) {
+                    s.second->sendPendingMessages();
+                }
+            }
         } else {
             fmt::print("Error listening on port {}\n", port);
             return 1;

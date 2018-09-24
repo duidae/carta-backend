@@ -8,8 +8,10 @@
 #include <cstdio>
 #include <uWS/uWS.h>
 #include <cstdint>
+#include <unordered_map>
 #include <casacore/casa/aips.h>
 #include <casacore/casa/OS/File.h>
+#include <tbb/concurrent_queue.h>
 
 #include <carta-protobuf/register_viewer.pb.h>
 #include <carta-protobuf/file_list.pb.h>
@@ -42,7 +44,7 @@ protected:
     std::vector<char> binaryPayloadCache;
 
     // permissions
-    std::map<std::string, std::vector<std::string> >& permissionsMap;
+    std::unordered_map<std::string, std::vector<std::string> >& permissionsMap;
     bool permissionsEnabled;
     std::string apiKey;
 
@@ -51,16 +53,19 @@ protected:
 
     // <file_id, Frame>: one frame per image file
     // TODO: clean up frames on session delete
-    std::map<int, std::unique_ptr<Frame>> frames;
+    std::unordered_map<int, std::unique_ptr<Frame>> frames;
 
     // for data compression
     ctpl::thread_pool& threadPool;
     CompressionSettings compressionSettings;
 
+    // Return message queue
+    tbb::concurrent_queue<std::vector<char>> out_msgs;
+
 public:
     Session(uWS::WebSocket<uWS::SERVER>* ws,
             boost::uuids::uuid uuid,
-            std::map<std::string, std::vector<std::string>>& permissionsMap,
+            std::unordered_map<std::string, std::vector<std::string>>& permissionsMap,
             bool enforcePermissions,
             std::string folder,
             ctpl::thread_pool& serverThreadPool,
@@ -75,6 +80,8 @@ public:
     void onCloseFile(const CARTA::CloseFile& message, uint32_t requestId);
     void onSetImageView(const CARTA::SetImageView& message, uint32_t requestId);
     void onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId);
+
+    void sendPendingMessages();
 
 protected:
     // ICD: File list response

@@ -22,7 +22,8 @@ private:
 };
 
 HDF5Loader::HDF5Loader(const std::string &filename)
-    : file(filename)
+    : file(filename),
+      hdf5Hdu("0")
 {}
 
 void HDF5Loader::openFile(const std::string &filename, const std::string &hdu) {

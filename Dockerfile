@@ -7,7 +7,7 @@ RUN \
   apt-get install -y bison build-essential byobu cmake curl default-jre emacs \
     fftw3-dev flex gdb gcc gfortran git git-lfs htop libblas-dev libboost-all-dev \
     libcfitsio-dev libfmt-dev libgtest-dev libhdf5-dev liblapack-dev libncurses-dev \
-    libprotobuf-dev libreadline-dev libssl-dev libstarlink-ast-dev \
+    libprotobuf-dev libreadline-dev libssl-dev libstarlink-ast-dev libtbb-dev \
     man protobuf-compiler python-pip python3-pip software-properties-common \
     unzip vim wcslib-dev wget
 
@@ -20,6 +20,7 @@ RUN \
 # Get carta dependencies
 # casacore data
 RUN \
+  git lfs install && \
   mkdir -p /usr/local/share/casacore && cd /usr/local/share/casacore && \
   git clone --no-checkout https://open-bitbucket.nrao.edu/scm/casa/casa-data.git data && \
   cd data && git show HEAD:distro | bash

@@ -1,6 +1,7 @@
 #include "Frame.h"
 #include "util.h"
 #include <memory>
+#include <tbb/tbb.h>
 
 using namespace carta;
 using namespace std;
@@ -157,33 +158,41 @@ std::vector<float> Frame::getImageData(bool meanFilter) {
 
     if (meanFilter) {
         // Perform down-sampling by calculating the mean for each MIPxMIP block
-        for (auto j = 0; j < numRowsRegion; j++) {
-            for (auto i = 0; i < rowLengthRegion; i++) {
-                float pixelSum = 0;
-                int pixelCount = 0;
-                for (auto pixelX = 0; pixelX < mip; pixelX++) {
-                    for (auto pixelY = 0; pixelY < mip; pixelY++) {
-                        auto imageRow = y + j * mip + pixelY;
-                        auto imageCol = x + i * mip + pixelX;
-                        float pixVal = channelCache(imageCol, imageRow);
-                        if (!isnan(pixVal)) {
-                            pixelCount++;
-                            pixelSum += pixVal;
+        auto range = tbb::blocked_range2d<size_t>(0, numRowsRegion, 0, rowLengthRegion);
+        auto loop = [&](const tbb::blocked_range2d<size_t> &r) {
+            for(size_t j = r.rows().begin(); j != r.rows().end(); ++j) {
+                for(size_t i = r.cols().begin(); i != r.cols().end(); ++i) {
+                    float pixelSum = 0;
+                    int pixelCount = 0;
+                    for (auto pixelX = 0; pixelX < mip; pixelX++) {
+                        for (auto pixelY = 0; pixelY < mip; pixelY++) {
+                            auto imageRow = y + j * mip + pixelY;
+                            auto imageCol = x + i * mip + pixelX;
+                            float pixVal = channelCache(imageCol, imageRow);
+                            if (!isnan(pixVal)) {
+                                pixelCount++;
+                                pixelSum += pixVal;
+                            }
                         }
                     }
+                    regionData[j * rowLengthRegion + i] = pixelCount ? pixelSum / pixelCount : NAN;
                 }
-                regionData[j * rowLengthRegion + i] = pixelCount ? pixelSum / pixelCount : NAN;
             }
-        }
+        };
+        tbb::parallel_for(range, loop);
     } else {
         // Nearest neighbour filtering
-        for (auto j = 0; j < numRowsRegion; j++) {
-            for (auto i = 0; i < rowLengthRegion; i++) {
-                auto imageRow = y + j * mip;
-                auto imageCol = x + i * mip;
-                regionData[j * rowLengthRegion + i] = channelCache(imageCol, imageRow);
+        auto range = tbb::blocked_range2d<size_t>(0, numRowsRegion, 0, rowLengthRegion);
+        auto loop = [&](const tbb::blocked_range2d<size_t> &r) {
+            for (auto j = 0; j < numRowsRegion; j++) {
+                for (auto i = 0; i < rowLengthRegion; i++) {
+                    auto imageRow = y + j * mip;
+                    auto imageCol = x + i * mip;
+                    regionData[j * rowLengthRegion + i] = channelCache(imageCol, imageRow);
+                }
             }
-        }
+        };
+        tbb::parallel_for(range, loop);
     }
     return regionData;
 }

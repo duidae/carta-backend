@@ -17,7 +17,7 @@ INCLUDE_DIRECTORIES(${HDF5_INCLUDE_DIR})
 ADD_SUBDIRECTORY(carta-protobuf)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR}/ImageData)
-set(LINK_LIBS ${LINK_LIBS} carta-protobuf ${PROTOBUF_LIBRARY} fmt hdf5_serial hdf5_cpp hdf5_hl_cpp uWS ssl crypto z zfp casa_casa casa_coordinates casa_tables casa_images casa_lattices casa_fits casa_measures casa_scimath ${Boost_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+set(LINK_LIBS ${LINK_LIBS} carta-protobuf ${PROTOBUF_LIBRARY} fmt hdf5_serial hdf5_cpp hdf5_hl_cpp uWS ssl crypto z zfp casa_casa casa_coordinates casa_tables casa_images casa_lattices casa_fits casa_measures casa_scimath ${Boost_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} tbb)
 set(SOURCE_FILES
   main.cc
   Session.cc
