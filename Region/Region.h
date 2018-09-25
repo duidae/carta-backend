@@ -7,7 +7,8 @@
 #pragma once
 
 #include "RegionStats.h"
-//#include "RegionProfiler.h"
+#include "RegionProfiler.h"
+#include <casacore/casa/Arrays/IPosition.h>
 
 namespace carta {
 
@@ -22,19 +23,21 @@ public:
     void setControlPoints(const std::vector<CARTA::Point>& points);
     void setRotation(const float rotation);
     // get Region parameters
-    //casacore::IPosition getProfileParams();  // (x, y, channel, stokes)
+    casacore::IPosition getProfileParams();  // (x, y, channel, stokes)
 
     // pass through to RegionStats
-    void setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
-    CARTA::SetHistogramRequirements_HistogramConfig getHistogramRequirement(int histogramIndex);
-    size_t numHistogramReqs();
-    CARTA::Histogram getHistogram(const casacore::Matrix<float>& chanMatrix,
+    bool setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
+    CARTA::SetHistogramRequirements_HistogramConfig getHistogramConfig(int histogramIndex);
+    size_t numHistogramConfigs();
+    void fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<float>& chanMatrix,
         const size_t chanIndex, const size_t stokesIndex);
 
     // pass through to RegionProfiler
-    //bool setSpatialRequirements(const std::vector<std::string>& profiles,
-    //    const casacore::IPosition& imshape, const int defaultStokes);
-    //std::vector<CARTA::SpatialProfile> getSpatialProfiles();
+    bool setSpatialRequirements(const std::vector<std::string>& profiles,
+        const casacore::IPosition& imshape, const int defaultStokes);
+    size_t numSpatialProfiles();
+    std::pair<int,int> getSpatialProfileReq(int profileIndex);
+    std::string getSpatialProfileStr(int profileIndex);
 
 private:
 
@@ -47,7 +50,7 @@ private:
     float m_rotation;
 
     std::unique_ptr<carta::RegionStats> m_stats;
-    //std::unique_ptr<carta::RegionProfiler> m_profiler;
+    std::unique_ptr<carta::RegionProfiler> m_profiler;
 };
 
 } // namespace carta

@@ -26,7 +26,8 @@ set(SOURCE_FILES
   compression.cc
   ImageData/FileLoader.cc
   Region/Region.cc
-  Region/RegionStats.cc)
+  Region/RegionStats.cc
+  Region/RegionProfiler.cc)
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
 target_link_libraries(hdf5_image_viewer ${LINK_LIBS})

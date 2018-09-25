@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include <carta-protobuf/defs.pb.h> // Histogram
 #include <carta-protobuf/region_requirements.pb.h>  // HistogramConfig
+#include <carta-protobuf/defs.pb.h>  // Histogram
 #include <casacore/casa/Arrays/Matrix.h>
 #include <casacore/casa/Arrays/IPosition.h>
 
@@ -15,11 +15,11 @@ namespace carta {
 class RegionStats {
 
 public:
-    void setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
-    CARTA::SetHistogramRequirements_HistogramConfig getHistogramRequirement(int histogramIndex);
-    size_t numHistogramReqs();
+    bool setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
+    size_t numHistogramConfigs();
+    CARTA::SetHistogramRequirements_HistogramConfig getHistogramConfig(int histogramIndex);
 
-    CARTA::Histogram getHistogram(const casacore::Matrix<float>& chanMatrix,
+    void fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<float>& chanMatrix,
         const size_t chanIndex, const size_t stokesIndex);
 
 private:

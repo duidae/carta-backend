@@ -32,7 +32,7 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
         // sendLogEvent(axesInfo, {"file"}, CARTA::ErrorSeverity::DEBUG);
 
-	// set current channel, stokes, channelCache
+        // set current channel, stokes, channelCache
         valid = setImageChannels(defaultChannel, 0);
 
         // make Region for entire image (after current channel/stokes set)
@@ -529,7 +529,7 @@ bool Frame::setRegionChannels(int regionId, int minchan, int maxchan, std::vecto
     // set chans to current if -1; set stokes to current if empty
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
-	// ICD SET_REGION: if empty, use current Stokes value
+        // ICD SET_REGION: if empty, use current Stokes value
         if (stokes.empty()) stokes.push_back(currentStokes());
         region->setChannels(minchan, maxchan, stokes);
         return true;
@@ -584,14 +584,12 @@ void Frame::setImageRegion() {
     point.set_y(0);
     points.push_back(point);
     setRegionControlPoints(-1, points);
-
     // histogram requirements
     std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-    CARTA::SetHistogramRequirements_HistogramConfig histConfig;
-    histConfig.set_channel(currentChannel());
-    histConfig.set_num_bins(-1);
-    configs.push_back(histConfig);
     setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+    // spatial requirements
+    std::vector<std::string> profiles;
+    setRegionSpatialRequirements(IMAGE_REGION_ID, profiles);
 }
 
 void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
@@ -607,6 +605,12 @@ void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
     std::vector<CARTA::Point> points;
     points.push_back(point);
     setRegionControlPoints(regionId, points);
+    // histogram requirements
+    std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+    setRegionHistogramRequirements(regionId, configs);
+    // spatial requirements
+    std::vector<std::string> profiles;
+    setRegionSpatialRequirements(regionId, profiles);
 }
 
 // ****************************************************
@@ -617,84 +621,126 @@ bool Frame::setRegionHistogramRequirements(int regionId,
     // set channel and num_bins for required histograms
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
-        region->setHistogramRequirements(histograms);
-	return true;
+        if (histograms.empty()) {  // default to current channel, auto bin size
+            std::vector<CARTA::SetHistogramRequirements_HistogramConfig> defaultConfigs;
+            CARTA::SetHistogramRequirements_HistogramConfig config;
+            config.set_channel(currentChannel());
+            config.set_num_bins(-1);
+            defaultConfigs.push_back(config);
+            return region->setHistogramRequirements(defaultConfigs);
+        } else {
+            return region->setHistogramRequirements(histograms);
+        }
     } else {
         // TODO: error handling
-	return false;
+        return false;
     }
 }
 
-std::vector<CARTA::Histogram> Frame::getRegionHistograms(int regionId) {
-    std::vector<CARTA::Histogram> histograms;
+void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
-	for (int i=0; i<region->numHistogramReqs(); ++i) {
-            CARTA::SetHistogramRequirements_HistogramConfig config = region->getHistogramRequirement(i);
-	    int reqChannel(config.channel()), reqStokes(currentStokes());
-	    if ((reqChannel == -1) && (!channelStats[reqStokes][currentChannel()].histogramBins.empty())) {
-                // use histogram from image file
-                auto& currentStats = channelStats[reqStokes][currentChannel()];
-                CARTA::Histogram histogram;
-		int nbins(currentStats.histogramBins.size());
-		histogram.set_num_bins(nbins);
-		histogram.set_bin_width((currentStats.maxVal - currentStats.minVal) / nbins);
-                histogram.set_first_bin_center(currentStats.minVal + (histogram.bin_width()/2.0));
-		*histogram.mutable_bins() = {currentStats.histogramBins.begin(), currentStats.histogramBins.end()};
-		histograms.push_back(histogram);
+        histogramData->set_stokes(currentStokes());
+        for (int i=0; i<region->numHistogramConfigs(); ++i) {
+            CARTA::SetHistogramRequirements_HistogramConfig config = region->getHistogramConfig(i);
+            int reqChannel(config.channel()), reqNumBins(config.num_bins());
+            // get channel(s) and stokes
+            int reqStokes(currentStokes());
+            std::vector<int> reqChannels;
+            if (reqChannel==-1) {
+                reqChannels.push_back(currentChannel());
+            } else if (reqChannel == -2) { // all channels
+                for (size_t i=0; i<imageShape(2); ++i)
+                   reqChannels.push_back(i);
             } else {
-                // calculate histogram
-	        std::vector<int> histogramChannels;
-	        if (reqChannel == -1) {
-                    histogramChannels.push_back(currentChannel());
-	        } else if (reqChannel == -2) { // all channels
-                    for (size_t i=0; i<imageShape(2); ++i)
-                       histogramChannels.push_back(i);
+                reqChannels.push_back(reqChannel);
+            }
+            // fill Histograms
+            for (auto channel : reqChannels) {
+                auto newHistogram = histogramData->add_histograms();
+                if ((!channelStats[reqStokes][channel].histogramBins.empty())) {
+                    // use histogram from image file
+                    auto& currentStats = channelStats[reqStokes][currentChannel()];
+                    int nbins(currentStats.histogramBins.size());
+                    newHistogram->set_num_bins(nbins);
+                    newHistogram->set_bin_width((currentStats.maxVal - currentStats.minVal) / nbins);
+                    newHistogram->set_first_bin_center(currentStats.minVal + (newHistogram->bin_width()/2.0));
+                    *newHistogram->mutable_bins() = {currentStats.histogramBins.begin(), currentStats.histogramBins.end()};
                 } else {
-                    histogramChannels.push_back(reqChannel);
-                }
-	        for (auto channel : histogramChannels) {
+                    // get new or stored histogram from Region
                     casacore::Matrix<float> chanMatrix = getChannelMatrix(channel, reqStokes);
-                    histograms.push_back(region->getHistogram(chanMatrix, channel, reqStokes));
+                    region->fillHistogram(newHistogram, chanMatrix, channel, reqStokes);
                 }
             }
         }
     }
-    return histograms; 
 }
 
 // ****************************************************
 // region profiles
-/*
+
 bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles) {
     // set requested spatial profiles e.g. ["Qx", "Uy"] or just ["x","y"] to use current stokes
+    if (!regions.count(regionId) && regionId==0) {
+        // frontend sends spatial reqs for cursor before SET_CURSOR; need to set cursor region
+        CARTA::Point centerPoint;
+        centerPoint.set_x(imageShape(0)/2);
+        centerPoint.set_y(imageShape(1)/2);
+        setCursorRegion(regionId, centerPoint);
+    }
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
-        return region->setSpatialRequirements(profiles, imageShape, currentStokes());
+        if (profiles.empty()) {  // default to ["x", "y"]
+            std::vector<std::string> defaultProfiles;
+            defaultProfiles.push_back("x");
+            defaultProfiles.push_back("y");
+            return region->setSpatialRequirements(defaultProfiles, imageShape, currentStokes());
+        } else {
+            return region->setSpatialRequirements(profiles, imageShape, currentStokes());
+        }
     } else {
         // TODO: error handling
-	return false;
+        return false;
     }
 }
 
-casacore::IPosition Frame::getRegionProfileParams(int regionId) {
-    // get (x, y, channel, stokes, value) as an IPosition
-    casacore::IPosition ipos;
+void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
-        ipos = region->getProfileParams();
-    } 
-    return ipos;
-}
+        // set profile parameters
+        casacore::IPosition params = region->getProfileParams(); // (x, y, chan, stokes)
+        profileData.set_x(params(0));
+        profileData.set_y(params(1));
+        profileData.set_channel(params(2));
+        profileData.set_stokes(params(3));
+        casacore::Matrix<float> chanMatrix;
+        chanMatrix.reference(getChannelMatrix(params(2), params(3)));  // (chan, stokes)
+        float value = chanMatrix(casacore::IPosition(2, params(0), params(1))); // (x, y)
+        profileData.set_value(value);
+        // set SpatialProfiles
+        for (size_t i=0; i<region->numSpatialProfiles(); ++i) {
+            auto newProfile = profileData.add_profiles();
+            newProfile->set_coordinate(region->getSpatialProfileStr(i));
+            newProfile->set_start(0);
+            // get <axis, stokes> for slicing image data
+            std::pair<int,int> axisStokes = region->getSpatialProfileReq(i);
+            chanMatrix.reference(getChannelMatrix(params(2), axisStokes.second));
+            std::vector<float> profile;
+            switch (axisStokes.first) {
+                case 0: {  // x
+                    newProfile->set_end(imageShape(0));
+                    profile = chanMatrix.column(params(1)).tovector();
+                    break;
+                }
+                case 1: { // y
+                    newProfile->set_end(imageShape(1));
+                    profile = chanMatrix.row(params(0)).tovector();
+                    break;
+                }
+            }
+            *newProfile->mutable_values() = {profile.begin(), profile.end()};
+        }
 
-std::vector<CARTA::SpatialProfile> Frame::getRegionSpatialProfiles(int regionId) {
-    std::vector<CARTA::SpatialProfile> profiles;
-    if (regions.count(regionId)) {
-        auto& region = regions[regionId];
-        profiles = region->getSpatialProfiles();
     }
-    return profiles;
 }
-*/
-
 

@@ -82,6 +82,9 @@ public:
     void onCloseFile(const CARTA::CloseFile& message, uint32_t requestId);
     void onSetImageView(const CARTA::SetImageView& message, uint32_t requestId);
     void onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId);
+    void onSetCursor(const CARTA::SetCursor& message, uint32_t requestId);
+    void onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId);
+    void onSetHistogramRequirements(const CARTA::SetHistogramRequirements& message, uint32_t requestId);
 
     void sendPendingMessages();
 
@@ -96,9 +99,12 @@ protected:
     bool fillExtendedFileInfo(CARTA::FileInfoExtended* extendedInfo, CARTA::FileInfo* fileInfo,
         const std::string folder, const std::string filename, std::string hdu, std::string& message);
 
-    // ICD: Send raster image data, optionally with histogram
+    // ICD: Send data streams
+    // raster image data, optionally with histogram
     void sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
     CARTA::RegionHistogramData* getRegionHistogramData(const int32_t fileId, const int32_t regionId=-1);
+    // spatial profile data
+    void sendSpatialProfileData(int fileId, int regionId);
 
     // data compression
     void setCompression(CARTA::CompressionType type, float quality, int nsubsets);

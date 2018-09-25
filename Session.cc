@@ -4,7 +4,6 @@
 
 #include <carta-protobuf/raster_image.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
-#include <carta-protobuf/spatial_profile.pb.h>
 #include <carta-protobuf/error.pb.h>
 
 #include <casacore/casa/OS/Path.h>
@@ -184,10 +183,7 @@ CARTA::RegionHistogramData* Session::getRegionHistogramData(const int32_t fileId
         histogramMessage = new RegionHistogramData();
         histogramMessage->set_file_id(fileId);
         histogramMessage->set_region_id(regionId);
-        histogramMessage->set_stokes(frame->currentStokes());
-	std::vector<CARTA::Histogram> histograms(frame->getRegionHistograms(regionId));
-	for (auto& histogram : histograms)
-            histogramMessage->mutable_histograms()->AddAllocated(new Histogram(histogram));
+        frame->fillRegionHistogramData(regionId, histogramMessage);
     }
     return histogramMessage;
 }
@@ -279,7 +275,6 @@ void Session::onCloseFile(const CloseFile& message, uint32_t requestId) {
 }
 
 void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
-    // Check if Frame is loaded
     auto fileId = message.file_id();
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
@@ -287,12 +282,11 @@ void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
         if (!frame->setBounds(message.image_bounds(), message.mip())) {
             // TODO: Error handling on bounds
         }
-
+        // save compression settings for sending raster data
         CARTA::CompressionType ctype(message.compression_type());
         int numsets(message.num_subsets());
         float quality(message.compression_quality());
         setCompression(ctype, quality, numsets);
-
         // RESPONSE
         CARTA::RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
         sendRasterImageData(fileId, requestId, histogramData);
@@ -307,9 +301,9 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         if (frame->setImageChannels(message.channel(), message.stokes())) {
-            // Send updated histogram
+            // RESPONSE: updated histogram
+            // Histogram message now managed by the raster image data
             RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
-            // Histogram message now managed by the image data object
             sendRasterImageData(fileId, requestId, histogramData);
         } else {
             // TODO: Error handling on bounds
@@ -319,7 +313,48 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
     }
 }
 
+void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        frame->setCursorRegion(CURSOR_REGION_ID, message.point());
+        if (message.has_spatial_requirements()) {
+            onSetSpatialRequirements(message.spatial_requirements(), requestId);
+        } else {
+            // RESPONSE
+            sendSpatialProfileData(fileId, CURSOR_REGION_ID);
+        }
+    } else {
+        // TODO: error handling
+    }
+}
 
+void Session::onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        auto regionId = message.region_id();
+        frame->setRegionSpatialRequirements(regionId, vector<string>(message.spatial_profiles().begin(), message.spatial_profiles().end()));
+        // RESPONSE
+        sendSpatialProfileData(fileId, regionId);
+    } else {
+        // TODO: error handling
+    }
+}
+
+void Session::onSetHistogramRequirements(const CARTA::SetHistogramRequirements& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        auto regionId = message.region_id();
+        frame->setRegionHistogramRequirements(regionId, vector<CARTA::SetHistogramRequirements_HistogramConfig>(message.histograms().begin(), message.histograms().end()));
+        // RESPONSE
+        RegionHistogramData* histogramData = getRegionHistogramData(fileId, regionId);
+        sendEvent("REGION_HISTOGRAM_DATA", requestId, *histogramData);
+    } else {
+        // TODO: error handling
+    }
+}
 
 // ******** SEND DATA STREAMS *********
 
@@ -405,6 +440,17 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
             // Send completed event to client
             sendEvent("RASTER_IMAGE_DATA", requestId, rasterImageData);
         }
+    }
+}
+
+void Session::sendSpatialProfileData(int fileId, int regionId) {
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        CARTA::SpatialProfileData spatialProfileData;
+        spatialProfileData.set_file_id(fileId);
+        spatialProfileData.set_region_id(regionId);
+        frame->fillSpatialProfileData(regionId, spatialProfileData);
+        sendEvent("SPATIAL_PROFILE_DATA", 0, spatialProfileData);
     }
 }
 

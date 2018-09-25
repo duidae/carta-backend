@@ -142,6 +142,21 @@ class OnMessageTask : public tbb::task {
             if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
                 session->onSetImageChannels(message, requestId);
             }
+        } else if (eventName == "SET_CURSOR") {
+            CARTA::SetCursor message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onSetCursor(message, requestId);
+            }
+        } else if (eventName == "SET_SPATIAL_REQUIREMENTS") {
+            CARTA::SetSpatialRequirements message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onSetSpatialRequirements(message, requestId);
+            }
+        } else if (eventName == "SET_HISTOGRAM_REQUIREMENTS") {
+            CARTA::SetHistogramRequirements message;
+            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+                session->onSetHistogramRequirements(message, requestId);
+            }
         } else {
             fmt::print("Unknown event type {}\n", eventName);
         }

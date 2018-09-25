@@ -7,7 +7,7 @@ using namespace carta;
 Region::Region(const std::string& name, const CARTA::RegionType type) :
     m_name(name), m_type(type), m_rotation(0.0) {
     m_stats = std::unique_ptr<RegionStats>(new RegionStats());
-    //m_profiler = std::unique_ptr<RegionProfiler>(new RegionProfiler());
+    m_profiler = std::unique_ptr<RegionProfiler>(new RegionProfiler());
 }
 
 void Region::setChannels(int minchan, int maxchan, std::vector<int>& stokes) {
@@ -24,7 +24,34 @@ void Region::setRotation(const float rotation) {
     m_rotation = rotation;
 }
 
-/*
+// ***********************************
+// RegionStats
+
+bool Region::setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs) {
+    m_stats->setHistogramRequirements(histogramReqs);
+}
+
+CARTA::SetHistogramRequirements_HistogramConfig Region::getHistogramConfig(int histogramIndex) {
+    return m_stats->getHistogramConfig(histogramIndex);
+}
+
+size_t Region::numHistogramConfigs() {
+    return m_stats->numHistogramConfigs();
+}
+
+void Region::fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<float>& chanMatrix,
+        const size_t chanIndex, const size_t stokesIndex) {
+    return m_stats->fillHistogram(histogram, chanMatrix, chanIndex, stokesIndex);
+}
+
+// ***********************************
+// RegionProfiler
+
+bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
+        const casacore::IPosition& imshape, const int defaultStokes) {
+    return m_profiler->setSpatialRequirements(profiles, imshape, defaultStokes);
+}
+
 casacore::IPosition Region::getProfileParams() {
     // get Region parameters (x, y, channel, stokes) for spatial profile
     casacore::IPosition params(4);
@@ -40,37 +67,15 @@ casacore::IPosition Region::getProfileParams() {
         params(3) = m_stokes[0];
     return params;
 }
-*/
 
-// ***********************************
-// RegionStats
-
-void Region::setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs) {
-    m_stats->setHistogramRequirements(histogramReqs);
+size_t Region::numSpatialProfiles() {
+    return m_profiler->numSpatialProfiles();
 }
 
-CARTA::SetHistogramRequirements_HistogramConfig Region::getHistogramRequirement(int histogramIndex) {
-    return m_stats->getHistogramRequirement(histogramIndex);
+std::pair<int,int> Region::getSpatialProfileReq(int profileIndex) {
+    return m_profiler->getSpatialProfileReq(profileIndex);
 }
 
-size_t Region::numHistogramReqs() {
-    return m_stats->numHistogramReqs();
+std::string Region::getSpatialProfileStr(int profileIndex) {
+    return m_profiler->getSpatialProfileStr(profileIndex);
 }
-
-CARTA::Histogram Region::getHistogram(const casacore::Matrix<float>& chanMatrix,
-        const size_t chanIndex, const size_t stokesIndex) {
-    return m_stats->getHistogram(chanMatrix, chanIndex, stokesIndex);
-}
-
-// ***********************************
-// RegionProfiler
-/*
-bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
-        const casacore::IPosition& imshape, const int defaultStokes) {
-    return m_profiler->setSpatialRequirements(profiles, imshape, defaultStokes);
-}
-
-std::vector<CARTA::SpatialProfile> Region::getSpatialProfiles() {
-    return m_profiler->getSpatialProfiles(getProfileParams());
-}
-*/

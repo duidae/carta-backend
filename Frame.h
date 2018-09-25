@@ -4,8 +4,8 @@
 #include <string>
 #include <memory>
 
-#include <carta-protobuf/defs.pb.h>
-#include <casacore/casa/Arrays/IPosition.h>
+#include <carta-protobuf/region_histogram.pb.h>
+#include <carta-protobuf/spatial_profile.pb.h>
 #include "ImageData/FileLoader.h"
 #include "Region/Region.h"
 
@@ -85,14 +85,12 @@ public:
     // setRegion for cursor (defaults for fields not in SET_CURSOR)
     void setCursorRegion(int regionId, const CARTA::Point& point);
 
-    // region histograms
+    // set requirements
     bool setRegionHistogramRequirements(int regionId,
         const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histograms);
-    std::vector<CARTA::Histogram> getRegionHistograms(int regionId);
+    bool setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles);
 
-    // region profiles
-    //bool setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles);
-    // returns (x, y, channel, stokes) as an IPosition:
-    //casacore::IPosition getRegionProfileParams(int regionId);
-    //std::vector<CARTA::SpatialProfile> getRegionSpatialProfiles(int regionId);
+    // get region histograms, profiles
+    void fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData);
+    void fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
 };
