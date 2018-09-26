@@ -29,6 +29,7 @@ void Region::setRotation(const float rotation) {
 
 bool Region::setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs) {
     m_stats->setHistogramRequirements(histogramReqs);
+    return true;
 }
 
 CARTA::SetHistogramRequirements_HistogramConfig Region::getHistogramConfig(int histogramIndex) {

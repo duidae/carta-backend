@@ -523,6 +523,7 @@ bool Frame::setRegion(int regionId, std::string name, CARTA::RegionType type, bo
         // TODO: create regionId
     }
     regions[regionId] = move(region);
+    return true;
 }
 
 bool Frame::setRegionChannels(int regionId, int minchan, int maxchan, std::vector<int>& stokes) {

@@ -8,11 +8,9 @@
 #include <regex>
 #include <fstream>
 #include <iostream>
-#include <tbb/cache_aligned_allocator.h>
-#include <tbb/task.h>
 #include <tbb/task_scheduler_init.h>
-#include "priority_ctpl.h"
 #include "Session.h"
+#include "OnMessageTask.h"
 
 #define MAX_THREADS 4
 
@@ -28,7 +26,6 @@ Hub h;
 string baseFolder = "./";
 bool verbose = false;
 bool usePermissions;
-ctpl::thread_pool threadPool;
 
 // Reads a permissions file to determine which API keys are required to access various subdirectories
 void readPermissions(string filename) {
@@ -54,18 +51,6 @@ void readPermissions(string filename) {
     } else {
         fmt::print("Missing permissions file\n");
     }
-}
-
-// Looks for null termination in a char array to determine event names from message payloads
-string getEventName(char* rawMessage) {
-    int nullIndex = 0;
-    for (auto i = 0; i < 32; i++) {
-        if (!rawMessage[i]) {
-            nullIndex = i;
-            break;
-        }
-    }
-    return string(rawMessage, nullIndex);
 }
 
 // Called on connection. Creates session object and assigns UUID and API keys to it
@@ -99,79 +84,6 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
     fmt::print("Client {} [{}] Disconnected ({}). Remaining clients: {}\n", boost::uuids::to_string(uuid), ws->getAddress().address, timeString, sessions.size());
 }
 
-class OnMessageTask : public tbb::task {
-    Session *session;
-    string eventName;
-    uint32_t requestId;
-    std::vector<char> eventPayload;
-
-    tbb::task* execute() {
-        //CARTA ICD
-        if (eventName == "REGISTER_VIEWER") {
-            CARTA::RegisterViewer message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onRegisterViewer(message, requestId);
-            }
-        } else if (eventName == "FILE_LIST_REQUEST") {
-            CARTA::FileListRequest message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onFileListRequest(message, requestId);
-            }
-        } else if (eventName == "FILE_INFO_REQUEST") {
-            CARTA::FileInfoRequest message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onFileInfoRequest(message, requestId);
-            }
-        } else if (eventName == "OPEN_FILE") {
-            CARTA::OpenFile message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onOpenFile(message, requestId);
-            }
-        } else if (eventName == "CLOSE_FILE") {
-            CARTA::CloseFile message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onCloseFile(message, requestId);
-            }
-        } else if (eventName == "SET_IMAGE_VIEW") {
-            CARTA::SetImageView message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onSetImageView(message, requestId);
-            }
-        } else if (eventName == "SET_IMAGE_CHANNELS") {
-            CARTA::SetImageChannels message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onSetImageChannels(message, requestId);
-            }
-        } else if (eventName == "SET_CURSOR") {
-            CARTA::SetCursor message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onSetCursor(message, requestId);
-            }
-        } else if (eventName == "SET_SPATIAL_REQUIREMENTS") {
-            CARTA::SetSpatialRequirements message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onSetSpatialRequirements(message, requestId);
-            }
-        } else if (eventName == "SET_HISTOGRAM_REQUIREMENTS") {
-            CARTA::SetHistogramRequirements message;
-            if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-                session->onSetHistogramRequirements(message, requestId);
-            }
-        } else {
-            fmt::print("Unknown event type {}\n", eventName);
-        }
-        return nullptr;
-    }
-
-public:
-    OnMessageTask(Session *session_, char *rawMessage_, size_t length_)
-        : session(session_),
-          eventName(getEventName(rawMessage_)),
-          requestId(*reinterpret_cast<uint32_t*>(rawMessage_+32)),
-          eventPayload(&rawMessage_[36], &rawMessage_[length_])
-    {}
-};
-
 // Forward message requests to session callbacks after parsing message into relevant ProtoBuf message
 void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode opCode) {
     auto session = sessions[ws];
@@ -184,7 +96,7 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
     if (opCode == OpCode::BINARY) {
         if (length > 36) {
             OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(session, rawMessage, length);
-            tbb::task::enqueue(*omt, tbb::priority_high);
+            tbb::task::enqueue(*omt);
         }
     } else {
         fmt::print("Invalid event type\n");
@@ -220,11 +132,13 @@ int main(int argc, const char* argv[]) {
             port = vm["port"].as<int>();
         }
 
-        int threadCount = MAX_THREADS;
+        int threadCount = tbb::task_scheduler_init::default_num_threads();
         if (vm.count("threads")) {
             threadCount = vm["threads"].as<int>();
         }
-        threadPool.resize(threadCount);
+        // Construct task scheduler
+        tbb::task_scheduler_init task_sched(threadCount);
+
 
         if (vm.count("folder")) {
             baseFolder = vm["folder"].as<string>();
@@ -233,9 +147,6 @@ int main(int argc, const char* argv[]) {
         if (usePermissions) {
             readPermissions("permissions.txt");
         }
-
-        // Construct task scheduler
-        tbb::task_scheduler_init task_sched;
 
         h.onMessage(&onMessage);
         h.onConnection(&onConnect);
