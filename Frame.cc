@@ -473,18 +473,18 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
         }
     }
     // update channelCache with new chan and stokes
-    channelCache.reference(getChannelMatrix(newChannel, newStokes));
+    getChannelMatrix(channelCache, newChannel, newStokes);
     stokesIndex = newStokes;
     channelIndex = newChannel;
     //updateHistogram();
     return true;
 }
 
-casacore::Matrix<float> Frame::getChannelMatrix(size_t channel, size_t stokes) {
+void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel, size_t stokes) {
     // matrix for given channel and stokes
     if (!channelCache.empty() && channel==channelIndex && stokes==stokesIndex) {
         // already cached
-        return channelCache;
+        chanMatrix.reference(channelCache);
     }
     casacore::IPosition count(2, imageShape(0), imageShape(1));
     casacore::IPosition start(2, 0, 0);
@@ -500,7 +500,7 @@ casacore::Matrix<float> Frame::getChannelMatrix(size_t channel, size_t stokes) {
     casacore::Slicer section(start, count);
     casacore::Array<float> tmp;
     loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, section, true);
-    return tmp;
+    chanMatrix.reference(tmp);
 }
 
 
@@ -668,7 +668,8 @@ void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* hi
                     *newHistogram->mutable_bins() = {currentStats.histogramBins.begin(), currentStats.histogramBins.end()};
                 } else {
                     // get new or stored histogram from Region
-                    casacore::Matrix<float> chanMatrix = getChannelMatrix(channel, reqStokes);
+                    casacore::Matrix<float> chanMatrix;
+                    getChannelMatrix(chanMatrix, channel, reqStokes);
                     region->fillHistogram(newHistogram, chanMatrix, channel, reqStokes);
                 }
             }
@@ -714,7 +715,7 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
         profileData.set_channel(params(2));
         profileData.set_stokes(params(3));
         casacore::Matrix<float> chanMatrix;
-        chanMatrix.reference(getChannelMatrix(params(2), params(3)));  // (chan, stokes)
+        getChannelMatrix(chanMatrix, params(2), params(3));  // (chan, stokes)
         float value = chanMatrix(casacore::IPosition(2, params(0), params(1))); // (x, y)
         profileData.set_value(value);
         // set SpatialProfiles
@@ -724,7 +725,7 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
             newProfile->set_start(0);
             // get <axis, stokes> for slicing image data
             std::pair<int,int> axisStokes = region->getSpatialProfileReq(i);
-            chanMatrix.reference(getChannelMatrix(params(2), axisStokes.second));
+            getChannelMatrix(chanMatrix, params(2), axisStokes.second);
             std::vector<float> profile;
             switch (axisStokes.first) {
                 case 0: {  // x

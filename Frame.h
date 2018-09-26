@@ -53,8 +53,8 @@ private:
 
     bool loadImageChannelStats(bool loadPercentiles = false);
     void setImageRegion(); // set region for entire image
-    // matrix for given channel and stokes
-    casacore::Matrix<float> getChannelMatrix(size_t channel, size_t stokes);
+    // fill given matrix for given channel and stokes
+    void getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel, size_t stokes);
 
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);
