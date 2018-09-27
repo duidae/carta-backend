@@ -431,16 +431,6 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             *headerEntry->mutable_value() = returnStr;
             headerEntry->set_entry_type(EntryType::STRING);
         }
-        // RADESYS
-        casacore::MDirection::Types dirTypes;
-        ok = imSummary.directionSystem(returnStr, dirTypes);
-        if (ok) {
-            headerEntry = extendedInfo->add_header_entries();
-            headerEntry->set_name("RADESYS");
-            *headerEntry->mutable_value() = returnStr;
-            headerEntry->set_entry_type(EntryType::STRING);
-	    radeSys = returnStr;
-        }
         // telescope
         headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("TELESCOP");

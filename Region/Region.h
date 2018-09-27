@@ -23,7 +23,7 @@ public:
     void setControlPoints(const std::vector<CARTA::Point>& points);
     void setRotation(const float rotation);
     // get Region parameters
-    casacore::IPosition getProfileParams();  // (x, y, channel, stokes)
+    CARTA::Point getControlPoint(int pointIndex=0);
 
     // pass through to RegionStats
     bool setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);

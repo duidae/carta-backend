@@ -53,20 +53,11 @@ bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
     return m_profiler->setSpatialRequirements(profiles, imshape, defaultStokes);
 }
 
-casacore::IPosition Region::getProfileParams() {
-    // get Region parameters (x, y, channel, stokes) for spatial profile
-    casacore::IPosition params(4);
-    // TODO: this is all for cursor, what to do for region?
-    if (!m_ctrl_pts.empty()) {
-        CARTA::Point point(m_ctrl_pts[0]); // use first point
-        params(0) = point.x();
-        params(1) = point.y();
-    }
-    if (m_minchan==m_maxchan)  // frame.currentChannel() at the time
-        params(2) = m_minchan;
-    if (!m_stokes.empty())
-        params(3) = m_stokes[0];
-    return params;
+CARTA::Point Region::getControlPoint(int pointIndex) {
+    CARTA::Point point;
+    if (pointIndex < m_ctrl_pts.size())
+        point = m_ctrl_pts[pointIndex];
+    return point;
 }
 
 size_t Region::numSpatialProfiles() {

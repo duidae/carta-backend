@@ -485,6 +485,7 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
     if (!channelCache.empty() && channel==channelIndex && stokes==stokesIndex) {
         // already cached
         chanMatrix.reference(channelCache);
+	return;
     }
     casacore::IPosition count(2, imageShape(0), imageShape(1));
     casacore::IPosition start(2, 0, 0);
@@ -595,23 +596,28 @@ void Frame::setImageRegion() {
 
 void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
     // a cursor is a region with one control point
-    if (!regions.count(regionId)) 
-        setRegion(regionId, "cursor", CARTA::POINT);
-    // use current channel and stokes for cursor
-    int currentChan(currentChannel());
-    std::vector<int> stokes;
-    stokes.push_back(currentStokes());
-    setRegionChannels(regionId, currentChan, currentChan, stokes);
-    // control point is cursor position
     std::vector<CARTA::Point> points;
     points.push_back(point);
-    setRegionControlPoints(regionId, points);
-    // histogram requirements
-    std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-    setRegionHistogramRequirements(regionId, configs);
-    // spatial requirements
-    std::vector<std::string> profiles;
-    setRegionSpatialRequirements(regionId, profiles);
+    if (regions.count(regionId)) {
+        // update point
+        setRegionControlPoints(regionId, points);
+    } else {
+        // set up new region
+        setRegion(regionId, "cursor", CARTA::POINT);
+        // use current channel and stokes for cursor
+        int currentChan(currentChannel());
+        std::vector<int> stokes;
+        stokes.push_back(currentStokes());
+        setRegionChannels(regionId, currentChan, currentChan, stokes);
+        // control point is cursor position
+        setRegionControlPoints(regionId, points);
+        // histogram requirements
+        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+        setRegionHistogramRequirements(regionId, configs);
+        // spatial requirements
+        std::vector<std::string> profiles;
+        setRegionSpatialRequirements(regionId, profiles);
+    }
 }
 
 // ****************************************************
@@ -710,15 +716,14 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
-        casacore::IPosition params = region->getProfileParams(); // (x, y, chan, stokes)
-        profileData.set_x(params(0));
-        profileData.set_y(params(1));
-        profileData.set_channel(params(2));
-        profileData.set_stokes(params(3));
-        casacore::Matrix<float> chanMatrix;
-        getChannelMatrix(chanMatrix, params(2), params(3));  // (chan, stokes)
-        float value = chanMatrix(casacore::IPosition(2, params(0), params(1))); // (x, y)
-        profileData.set_value(value);
+        CARTA::Point ctrlPt = region->getControlPoint();
+	int x(ctrlPt.x()), y(ctrlPt.y());
+        profileData.set_x(x);
+        profileData.set_y(y);
+	int chan(currentChannel());
+        profileData.set_channel(chan);
+        profileData.set_stokes(currentStokes());
+        profileData.set_value(channelCache(casacore::IPosition(2, x, y)));
         // set SpatialProfiles
         for (size_t i=0; i<region->numSpatialProfiles(); ++i) {
             auto newProfile = profileData.add_profiles();
@@ -726,17 +731,18 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
             newProfile->set_start(0);
             // get <axis, stokes> for slicing image data
             std::pair<int,int> axisStokes = region->getSpatialProfileReq(i);
-            getChannelMatrix(chanMatrix, params(2), axisStokes.second);
+            casacore::Matrix<float> chanMatrix;
+            getChannelMatrix(chanMatrix, chan, axisStokes.second);
             std::vector<float> profile;
             switch (axisStokes.first) {
                 case 0: {  // x
                     newProfile->set_end(imageShape(0));
-                    profile = chanMatrix.column(params(1)).tovector();
+                    profile = chanMatrix.column(y).tovector();
                     break;
                 }
                 case 1: { // y
                     newProfile->set_end(imageShape(1));
-                    profile = chanMatrix.row(params(0)).tovector();
+                    profile = chanMatrix.row(x).tovector();
                     break;
                 }
             }

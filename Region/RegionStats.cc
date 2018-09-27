@@ -19,7 +19,10 @@ size_t RegionStats::numHistogramConfigs() {
 }
 
 CARTA::SetHistogramRequirements_HistogramConfig RegionStats::getHistogramConfig(int histogramIndex) {
-    return m_configs[histogramIndex];
+    CARTA::SetHistogramRequirements_HistogramConfig config;
+    if (histogramIndex < m_configs.size())
+        config = m_configs[histogramIndex];
+    return config;
 }
 
 void RegionStats::fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<float>& chanMatrix,
