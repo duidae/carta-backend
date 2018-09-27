@@ -10,4 +10,6 @@ The server build depends on the following libraries:
 * [µWS](https://github.com/uNetworking/uWebSockets) for socket communication with client. Build and install from git repo.
 * boost [filesystem](https://www.boost.org/doc/libs/release/libs/filesystem), [uuid](http://www.boost.org/doc/libs/release/libs/uuid) and [program_options](http://www.boost.org/doc/libs/release/libs/program_options) modules (All easily installed through `apt`)
 
-Use cmake to build. Currently, the server looks for HDF5 files in the `$HOME` directory. 
+Use cmake to build. Currently, the server looks for HDF5 files in the `$HOME` directory.
+
+[![Build Status](http://acdc0.asiaa.sinica.edu.tw:47565/job/nrao-carta-backend/badge/icon)](http://acdc0.asiaa.sinica.edu.tw:47565/job/nrao-carta-backend) 
