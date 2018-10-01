@@ -11,7 +11,9 @@
 #include <carta-protobuf/set_cursor.pb.h>
 #include <carta-protobuf/set_image_channels.pb.h>
 #include <carta-protobuf/set_image_view.pb.h>
+#include <chrono>
 #include <cstring>
+#include <fmt/format.h>
 
 // Looks for null termination in a char array to determine event names from message payloads
 std::string getEventName(char* rawMessage) {
@@ -28,6 +30,7 @@ OnMessageTask::OnMessageTask(Session *session_, char *rawMessage_, size_t length
 
 tbb::task* OnMessageTask::execute() {
     //CARTA ICD
+    auto tStart = std::chrono::high_resolution_clock::now();
     if (eventName == "REGISTER_VIEWER") {
         CARTA::RegisterViewer message;
         if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
@@ -81,5 +84,8 @@ tbb::task* OnMessageTask::execute() {
     } else {
         fmt::print("Unknown event type {}\n", eventName);
     }
+    auto tEnd = std::chrono::high_resolution_clock::now();
+    auto dt = std::chrono::duration_cast<std::chrono::microseconds>(tEnd - tStart).count();
+    fmt::print("Operation {} took {}ms\n", eventName, dt/1e3);
     return nullptr;
 }
