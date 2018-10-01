@@ -2,8 +2,14 @@
 
 #include "RegionStats.h"
 
+#include <chrono>
 #include <cmath>
+#include <fmt/format.h>
 #include <limits>
+#include <tbb/blocked_range.h>
+#include <tbb/blocked_range2d.h>
+#include <tbb/parallel_for.h>
+#include <tbb/parallel_reduce.h>
 #include <casacore/casa/Arrays/ArrayMath.h>
 
 using namespace carta;
@@ -34,6 +40,8 @@ void RegionStats::fillHistogram(CARTA::Histogram* histogram, const casacore::Mat
         // create histogram for this channel, stokes
         m_stokes = stokesIndex;
 
+        // auto tStart = std::chrono::high_resolution_clock::now();
+
         size_t nrow(chanMatrix.nrow()), ncol(chanMatrix.ncolumn());
         int numBins(0);
         for (auto& chanConfig : m_configs) {
@@ -44,30 +52,74 @@ void RegionStats::fillHistogram(CARTA::Histogram* histogram, const casacore::Mat
         }
         if (numBins < 0) 
             numBins = int(max(sqrt(nrow * ncol), 2.0));
-        std::vector<int> histogramBins(numBins);
 
-        // find max, min, bin width; values could be nan
-        float minVal(std::numeric_limits<float>::max()), maxVal(std::numeric_limits<float>::min());
-        for (auto i = 0; i < ncol; i++) {
-            for (auto j = 0; j < nrow; ++j) {
-                auto v = chanMatrix(j,i);
-                if (std::isnan(v))
-                    continue;
-                minVal = std::fmin(minVal, v);
-                maxVal = std::fmax(maxVal, v);
-            }
-        }
+        // Calculate min
+        tbb::blocked_range2d<size_t> range(0, ncol, 0, nrow);
+        float minVal = tbb::parallel_reduce(
+            range,
+            std::numeric_limits<float>::max(),
+            [&chanMatrix](const tbb::blocked_range2d<size_t> &r, const float &init) {
+                float mv = init;
+                for(size_t j = r.rows().begin(); j != r.rows().end(); ++j) {
+                    for(size_t i = r.cols().begin(); i != r.cols().end(); ++i) {
+                        mv = std::fmin(mv, chanMatrix(i,j));
+                    }
+                }
+                return mv;
+            },
+            [](float x, float y) {
+                return std::min(x, y);
+            });
+        // Calculate max
+        float maxVal = tbb::parallel_reduce(
+            range,
+            std::numeric_limits<float>::min(),
+            [&chanMatrix](const tbb::blocked_range2d<size_t> &r, const float &init) {
+                float mv = init;
+                for(size_t j = r.rows().begin(); j != r.rows().end(); ++j) {
+                    for(size_t i = r.cols().begin(); i != r.cols().end(); ++i) {
+                        mv = std::fmax(mv, chanMatrix(i,j));
+                    }
+                }
+                return mv;
+            },
+            [](float x, float y) {
+                return std::max(x, y);
+            });
+
         float binWidth = (maxVal - minVal) / numBins;
+        std::vector<int> histogramBins = tbb::parallel_reduce(
+            range,
+            std::vector<int>(numBins, 0),
+            [&binWidth, &chanMatrix, &maxVal, &minVal, &numBins](const tbb::blocked_range2d<size_t> &r, const std::vector<int> &init) {
+                std::vector<int> hist(init);
+                for (auto j = r.rows().begin(); j != r.rows().end(); ++j) {
+                    for (auto i = r.cols().begin(); i != r.cols().end(); ++i) {
+                        auto v = chanMatrix(i,j);
+                        if (std::isnan(v))
+                            continue;
+                        int bin = std::max(std::min((int) ((v - minVal) / binWidth), numBins - 1), 0);
+                        ++hist[bin];
+                    }
+                }
+                return hist;
+            },
+            [&numBins](const std::vector<int> &a, const std::vector<int> &b) {
+                // TBF: This could probably be done more intelligently...
+                std::vector<int> c(numBins);
+                auto range = tbb::blocked_range<size_t>(0, numBins);
+                auto loop = [&](const tbb::blocked_range<size_t> &r) {
+                    size_t beg = r.begin();
+                    size_t end = r.end();
+                    std::transform(&a[beg], &a[end], &b[beg], &c[beg], std::plus<int>());
+                };
+                tbb::parallel_for(range, loop);
+                return c;
+            });
 
-        for (auto i = 0; i < ncol; i++) {
-            for (auto j = 0; j < nrow; ++j) {
-                auto v = chanMatrix(j,i);
-                if (std::isnan(v))
-                    continue;
-                int bin = std::max(std::min((int) ((v - minVal) / binWidth), numBins - 1), 0);
-                histogramBins[bin]++;
-            }
-        }
+        // auto tEnd = std::chrono::high_resolution_clock::now();
+        // auto dt = std::chrono::duration_cast<std::chrono::microseconds>(tEnd - tStart).count();
+        // fmt::print("histogram loops took {}ms\n", dt/1e3);
 
         // fill histogram
         histogram->set_channel(chanIndex);
