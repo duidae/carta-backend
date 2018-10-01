@@ -53,38 +53,26 @@ void RegionStats::fillHistogram(CARTA::Histogram* histogram, const casacore::Mat
         if (numBins < 0) 
             numBins = int(max(sqrt(nrow * ncol), 2.0));
 
-        // Calculate min
+        // Calculate min/max
+        float minVal, maxVal;
         tbb::blocked_range2d<size_t> range(0, ncol, 0, nrow);
-        float minVal = tbb::parallel_reduce(
+        std::tie(minVal, maxVal) = tbb::parallel_reduce(
             range,
-            std::numeric_limits<float>::max(),
-            [&chanMatrix](const tbb::blocked_range2d<size_t> &r, const float &init) {
-                float mv = init;
+            std::make_pair(std::numeric_limits<float>::max(), std::numeric_limits<float>::min()),
+            [&chanMatrix](const tbb::blocked_range2d<size_t> &r, const std::pair<float,float> &init) {
+                std::pair<float,float> mmv = init;
                 for(size_t j = r.rows().begin(); j != r.rows().end(); ++j) {
                     for(size_t i = r.cols().begin(); i != r.cols().end(); ++i) {
-                        mv = std::fmin(mv, chanMatrix(i,j));
+                        float val = chanMatrix(i,j);
+                        mmv.first = std::fmin(mmv.first, val);
+                        mmv.second = std::fmax(mmv.second, val);
                     }
                 }
-                return mv;
+                return mmv;
             },
-            [](float x, float y) {
-                return std::min(x, y);
-            });
-        // Calculate max
-        float maxVal = tbb::parallel_reduce(
-            range,
-            std::numeric_limits<float>::min(),
-            [&chanMatrix](const tbb::blocked_range2d<size_t> &r, const float &init) {
-                float mv = init;
-                for(size_t j = r.rows().begin(); j != r.rows().end(); ++j) {
-                    for(size_t i = r.cols().begin(); i != r.cols().end(); ++i) {
-                        mv = std::fmax(mv, chanMatrix(i,j));
-                    }
-                }
-                return mv;
-            },
-            [](float x, float y) {
-                return std::max(x, y);
+            [](const std::pair<float,float> &x, const std::pair<float,float> &y) {
+                return std::make_pair(
+                    std::min(x.first, y.first), std::max(x.second, y.second));
             });
 
         float binWidth = (maxVal - minVal) / numBins;
