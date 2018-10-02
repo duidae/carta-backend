@@ -28,6 +28,7 @@ set(SOURCE_FILES
   Region/Region.cc
   Region/RegionStats.cc
   Region/RegionProfiler.cc
+  Region/Histogram.cc
   OnMessageTask.cc)
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
