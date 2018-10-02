@@ -13,6 +13,7 @@ public:
     void openFile(const std::string &file, const std::string &hdu) override;
     bool hasData(FileInfo::Data ds) const override;
     image_ref loadData(FileInfo::Data ds) override;
+    int stokesAxis() override;
 
 private:
     std::string file;
@@ -45,6 +46,15 @@ bool CasaLoader::hasData(FileInfo::Data dl) const {
 
 typename CasaLoader::image_ref CasaLoader::loadData(FileInfo::Data) {
     return image;
+}
+
+int CasaLoader::stokesAxis() {
+    casacore::CoordinateSystem csys(image.coordinates());
+    casacore::Int coordnum = csys.findCoordinate(casacore::Coordinate::STOKES);
+    if (coordnum < 0)
+        return -1;
+    else
+        return csys.pixelAxes(coordnum)(0);
 }
 
 } // namespace carta

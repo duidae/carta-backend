@@ -1,5 +1,6 @@
 #include "Frame.h"
 #include "util.h"
+
 #include <memory>
 #include <tbb/tbb.h>
 
@@ -20,13 +21,14 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         loader->openFile(filename, hdu);
         auto &dataSet = loader->loadData(FileInfo::Data::XYZW);
 
-        imageShape = dataSet.shape(); //(width, height, chan, stokes)
+        imageShape = dataSet.shape();
         ndims = imageShape.size();
         if (ndims < 2 || ndims > 4) {
             log(uuid, "Problem loading file {}: Image must be 2D, 3D or 4D.", filename);
             valid = false;
             return;
         }
+        stokesAxis = loader->stokesAxis();
 
         log(uuid, "Opening image with dimensions: {}", imageShape);
         // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
@@ -485,7 +487,7 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
     if (!channelCache.empty() && channel==channelIndex && stokes==stokesIndex) {
         // already cached
         chanMatrix.reference(channelCache);
-	return;
+        return;
     }
     casacore::IPosition count(2, imageShape(0), imageShape(1));
     casacore::IPosition start(2, 0, 0);
@@ -496,7 +498,10 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
         start.append(casacore::IPosition(1, channel));
     } else if(ndims == 4) {
         count.append(casacore::IPosition(2, 1, 1));
-        start.append(casacore::IPosition(2, stokes, channel));
+        if (stokesAxis==2)
+            start.append(casacore::IPosition(2, stokes, channel));
+        else
+            start.append(casacore::IPosition(2, channel, stokes));
     }
     casacore::Slicer section(start, count);
     casacore::Array<float> tmp;
@@ -504,6 +509,38 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
     chanMatrix.reference(tmp);
 }
 
+void Frame::getProfileSlicer(casacore::Slicer& latticeSlicer, int x, int y, int channel, int stokes) {
+    // to slice image data along x, y, or channel axis (indicated with -1)
+    casacore::IPosition start, count;
+    if (x<0) { // get x profile
+        start = casacore::IPosition(1,0);
+        count = casacore::IPosition(1,imageShape(0));
+    } else {
+        start = casacore::IPosition(1,x);
+        count = casacore::IPosition(1,1);
+    }
+
+    if (y<0) { // get y profile
+        start.append(casacore::IPosition(1,0));
+        count.append(casacore::IPosition(1,imageShape(1)));
+    } else {
+        start.append(casacore::IPosition(1,y));
+        count.append(casacore::IPosition(1,1));
+    }
+
+    if(ndims == 3) {
+        start.append(casacore::IPosition(1,channel));
+        count.append(casacore::IPosition(1,1));
+    } else if(ndims==4) {
+        if (stokesAxis==2)
+            start.append(casacore::IPosition(2,stokes,channel));
+        else
+            start.append(casacore::IPosition(2,channel,stokes));
+        count.append(casacore::IPosition(2,1,1));
+    }
+    casacore::Slicer section(start, count);
+    latticeSlicer = section;
+}
 
 int Frame::currentChannel() {
     return channelIndex;
@@ -590,8 +627,8 @@ void Frame::setImageRegion() {
     std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
     setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
     // spatial requirements
-    std::vector<std::string> profiles;
-    setRegionSpatialRequirements(IMAGE_REGION_ID, profiles);
+    std::vector<std::string> spatialProfiles;
+    setRegionSpatialRequirements(IMAGE_REGION_ID, spatialProfiles);
 }
 
 void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
@@ -615,13 +652,15 @@ void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
         std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
         setRegionHistogramRequirements(regionId, configs);
         // spatial requirements
-        std::vector<std::string> profiles;
-        setRegionSpatialRequirements(regionId, profiles);
+        std::vector<std::string> spatialProfiles;
+        setRegionSpatialRequirements(regionId, spatialProfiles);
     }
 }
 
 // ****************************************************
-// region histograms
+// region profiles
+
+// region requirements
 
 bool Frame::setRegionHistogramRequirements(int regionId,
         const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histograms) {
@@ -643,6 +682,33 @@ bool Frame::setRegionHistogramRequirements(int regionId,
         return false;
     }
 }
+
+bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles) {
+    // set requested spatial profiles e.g. ["Qx", "Uy"] or just ["x","y"] to use current stokes
+    if (!regions.count(regionId) && regionId==-1) {
+        // frontend sends spatial reqs for cursor before SET_CURSOR; need to set cursor region
+        CARTA::Point centerPoint;
+        centerPoint.set_x(imageShape(-1)/2);
+        centerPoint.set_y(imageShape(0)/2);
+        setCursorRegion(regionId, centerPoint);
+    }
+    if (regions.count(regionId)) {
+        auto& region = regions[regionId];
+        if (profiles.empty()) {  // default to ["x", "y"]
+            std::vector<std::string> defaultProfiles;
+            defaultProfiles.push_back("x");
+            defaultProfiles.push_back("y");
+            return region->setSpatialRequirements(defaultProfiles, imageShape, currentStokes());
+        } else {
+            return region->setSpatialRequirements(profiles, imageShape, currentStokes());
+        }
+    } else {
+        // TODO: error handling
+        return false;
+    }
+}
+
+// region data
 
 void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData) {
     if (regions.count(regionId)) {
@@ -684,71 +750,62 @@ void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* hi
     }
 }
 
-// ****************************************************
-// region profiles
-
-bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles) {
-    // set requested spatial profiles e.g. ["Qx", "Uy"] or just ["x","y"] to use current stokes
-    if (!regions.count(regionId) && regionId==0) {
-        // frontend sends spatial reqs for cursor before SET_CURSOR; need to set cursor region
-        CARTA::Point centerPoint;
-        centerPoint.set_x(imageShape(0)/2);
-        centerPoint.set_y(imageShape(1)/2);
-        setCursorRegion(regionId, centerPoint);
-    }
-    if (regions.count(regionId)) {
-        auto& region = regions[regionId];
-        if (profiles.empty()) {  // default to ["x", "y"]
-            std::vector<std::string> defaultProfiles;
-            defaultProfiles.push_back("x");
-            defaultProfiles.push_back("y");
-            return region->setSpatialRequirements(defaultProfiles, imageShape, currentStokes());
-        } else {
-            return region->setSpatialRequirements(profiles, imageShape, currentStokes());
-        }
-    } else {
-        // TODO: error handling
-        return false;
-    }
-}
-
 void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
         CARTA::Point ctrlPt = region->getControlPoint();
-	int x(ctrlPt.x()), y(ctrlPt.y());
+        int x(ctrlPt.x()), y(ctrlPt.y());
         profileData.set_x(x);
         profileData.set_y(y);
-	int chan(currentChannel());
+        int chan(currentChannel());
         profileData.set_channel(chan);
         profileData.set_stokes(currentStokes());
         profileData.set_value(channelCache(casacore::IPosition(2, x, y)));
-        // set SpatialProfiles
+        // set profiles
         for (size_t i=0; i<region->numSpatialProfiles(); ++i) {
+            // SpatialProfile
             auto newProfile = profileData.add_profiles();
             newProfile->set_coordinate(region->getSpatialProfileStr(i));
             newProfile->set_start(0);
             // get <axis, stokes> for slicing image data
             std::pair<int,int> axisStokes = region->getSpatialProfileReq(i);
-            casacore::Matrix<float> chanMatrix;
-            getChannelMatrix(chanMatrix, chan, axisStokes.second);
-            std::vector<float> profile;
-            switch (axisStokes.first) {
-                case 0: {  // x
-                    newProfile->set_end(imageShape(0));
-                    profile = chanMatrix.column(y).tovector();
-                    break;
+	    std::vector<float> profile;
+	    if (axisStokes.second == currentStokes()) {
+                // use stored channel matrix 
+		switch (axisStokes.first) {
+                    case 0: { // x
+                        profile = channelCache.column(y).tovector();
+                        newProfile->set_end(imageShape(0));
+			break;
+                    }
+                    case 1: { // y
+                        profile = channelCache.row(x).tovector();
+                        newProfile->set_end(imageShape(1));
+			break;
+                    }
                 }
-                case 1: { // y
-                    newProfile->set_end(imageShape(1));
-                    profile = chanMatrix.row(x).tovector();
-                    break;
+            } else {
+                // slice image data
+                casacore::Slicer section;
+                switch (axisStokes.first) {
+                    case 0: {  // x
+                        getProfileSlicer(section, -1, y, chan, axisStokes.second);
+                        newProfile->set_end(imageShape(0));
+                        break;
+                    }
+                    case 1: { // y
+                        getProfileSlicer(section, x, -1, chan, axisStokes.second);
+                        newProfile->set_end(imageShape(1));
+                        break;
+                    }
                 }
+                casacore::Array<float> tmp;
+                loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, section, true);
+                profile = tmp.tovector();
             }
             *newProfile->mutable_values() = {profile.begin(), profile.end()};
         }
-
     }
 }
 

@@ -34,6 +34,7 @@ private:
     std::unique_ptr<carta::FileLoader> loader;
     casacore::IPosition imageShape; // (width, height, depth, stokes)
     size_t ndims;
+    int stokesAxis;
     std::vector<std::vector<ChannelStats>> channelStats;
 
     // set image view 
@@ -55,6 +56,8 @@ private:
     void setImageRegion(); // set region for entire image
     // fill given matrix for given channel and stokes
     void getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel, size_t stokes);
+    // get image data slicer for axis profile: whichever axis is set to -1
+    void getProfileSlicer(casacore::Slicer& latticeSlicer, int x, int y, int channel, int stokes);
 
 public:
     Frame(const std::string& uuidString, const std::string& filename, const std::string& hdu, int defaultChannel = 0);

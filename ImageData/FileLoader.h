@@ -49,6 +49,8 @@ public:
     // Return a casacore image type representing the data stored in the
     // specified HDU/group/table/etc.
     virtual image_ref loadData(FileInfo::Data ds) = 0;
+    // For 4D images, return which axis is Stokes; else -1
+    virtual int stokesAxis() = 0;
 };
 
 } // namespace carta

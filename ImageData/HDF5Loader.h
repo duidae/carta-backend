@@ -2,6 +2,8 @@
 
 #include "FileLoader.h"
 #include <casacore/lattices/Lattices/HDF5Lattice.h>
+#include <H5Cpp.h>
+#include <H5File.h>
 #include <string>
 #include <unordered_map>
 
@@ -13,6 +15,7 @@ public:
     void openFile(const std::string &file, const std::string &hdu) override;
     bool hasData(FileInfo::Data ds) const override;
     image_ref loadData(FileInfo::Data ds) override;
+    int stokesAxis() override;
 
 private:
     static std::string dataSetToString(FileInfo::Data ds);
@@ -83,6 +86,30 @@ std::string HDF5Loader::dataSetToString(FileInfo::Data ds) {
         { FileInfo::Data::Ranks,      "PERCENTILE_RANKS" },
     };
     return (um.find(ds) != um.end()) ? um[ds] : "";
+}
+
+int HDF5Loader::stokesAxis() {
+    // returns -1 if no stokes axis
+    H5::H5File hdf5file(file, H5F_ACC_RDONLY);
+    H5::Group topLevelGroup = hdf5file.openGroup(hdf5Hdu);
+    hid_t groupId = topLevelGroup.getId();
+    char* type;
+    // read CTYPE3
+    hid_t ctypeID = H5Aopen_name(groupId, "CTYPE3");
+    if (ctypeID > 0) {
+        H5Aread(ctypeID, H5T_STRING, type);
+        H5Aclose(ctypeID);
+        if (type=="STOKES") return 2;
+        // read CTYPE4
+        ctypeID = H5Aopen_name(groupId, "CTYPE4");
+	if (ctypeID > 0) {
+            H5Aread(ctypeID, H5T_STRING, type);
+            H5Aclose(ctypeID);
+            if (type=="STOKES") return 3;
+        }
+    }
+    // no stokes axis
+    return -1;
 }
 
 } // namespace carta
