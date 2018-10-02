@@ -28,7 +28,12 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
             valid = false;
             return;
         }
+
+	// determine chan and stokes axes
         stokesAxis = loader->stokesAxis();
+	if (ndims < 3) chanAxis = -1;
+	else chanAxis = 2;
+	if (ndims == 4 && stokesAxis==2) chanAxis=3;
 
         log(uuid, "Opening image with dimensions: {}", imageShape);
         // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
@@ -153,8 +158,8 @@ bool Frame::loadImageChannelStats(bool loadPercentiles) {
         return false;
     }
 
-    size_t depth(ndims>2 ? imageShape(2) : 1);
-    size_t nstokes(ndims>3 ? imageShape(3) : 1);
+    size_t depth(chanAxis>0 ? imageShape(chanAxis) : 1);
+    size_t nstokes(stokesAxis>0 ? imageShape(stokesAxis) : 1);
     channelStats.resize(nstokes);
     for (auto i = 0; i < nstokes; i++) {
         channelStats[i].resize(depth);
@@ -467,10 +472,8 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
         log(uuid, "No file loaded");
         return false;
     } else {
-        int chanAxis(2);
-        if (stokesAxis==2) chanAxis=3;
-        size_t depth(ndims>2 ? imageShape(chanAxis) : 1);
-        size_t nstokes(ndims>3 ? imageShape(stokesAxis) : 1);
+        size_t depth(chanAxis>0 ? imageShape(chanAxis) : 1);
+        size_t nstokes(stokesAxis>0 ? imageShape(stokesAxis) : 1);
         if (newChannel < 0 || newChannel >= depth || newStokes < 0 || newStokes >= nstokes) {
             log(uuid, "Channel {} (stokes {}) is invalid in file {}", newChannel, newStokes, filename);
             return false;
@@ -480,7 +483,10 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
     getChannelMatrix(channelCache, newChannel, newStokes);
     stokesIndex = newStokes;
     channelIndex = newChannel;
-    //updateHistogram();
+
+    //update Histogram: use current channel
+    std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+    setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
     return true;
 }
 
@@ -606,16 +612,18 @@ bool Frame::setRegionRotation(int regionId, float rotation) {
 void Frame::setImageRegion() {
     // create a Region for the entire image, regionId = -1
     setRegion(IMAGE_REGION_ID, "image", CARTA::RECTANGLE, true);
-    // channels
-    int nchan(ndims>2 ? imageShape(2) : 1);
+
+    // set image region channels: all channels, all stokes
+    int minchan(0);
+    int maxchan = (chanAxis>0 ? imageShape(chanAxis)-1 : 0);
     std::vector<int> stokes;
-    if (ndims > 3) {
-        for (unsigned int i=0; i<imageShape(3); ++i)
+    if (stokesAxis > 0) {
+        for (int i=0; i<imageShape(stokesAxis); ++i)
             stokes.push_back(i);
     }
-    setRegionChannels(IMAGE_REGION_ID, 0, nchan, stokes);
-    // control points
-    // rectangle from top left (0,height) to bottom right (width, 0)
+    setRegionChannels(IMAGE_REGION_ID, minchan, maxchan, stokes);
+
+    // control points: rectangle from top left (0,height) to bottom right (width,0)
     std::vector<CARTA::Point> points(2);
     CARTA::Point point;
     point.set_x(0);
@@ -625,9 +633,11 @@ void Frame::setImageRegion() {
     point.set_y(0);
     points.push_back(point);
     setRegionControlPoints(-1, points);
-    // histogram requirements
+
+    // histogram requirements: use current channel
     std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
     setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+
     // spatial requirements
     std::vector<std::string> spatialProfiles;
     setRegionSpatialRequirements(IMAGE_REGION_ID, spatialProfiles);
@@ -637,6 +647,7 @@ void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
     // a cursor is a region with one control point
     std::vector<CARTA::Point> points;
     points.push_back(point);
+
     if (regions.count(regionId)) {
         // update point
         setRegionControlPoints(regionId, points);
@@ -648,11 +659,14 @@ void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
         std::vector<int> stokes;
         stokes.push_back(currentStokes());
         setRegionChannels(regionId, currentChan, currentChan, stokes);
+
         // control point is cursor position
         setRegionControlPoints(regionId, points);
-        // histogram requirements
+
+        // histogram requirements: use current channel
         std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
         setRegionHistogramRequirements(regionId, configs);
+
         // spatial requirements
         std::vector<std::string> spatialProfiles;
         setRegionSpatialRequirements(regionId, spatialProfiles);
@@ -690,8 +704,8 @@ bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::st
     if (!regions.count(regionId) && regionId==-1) {
         // frontend sends spatial reqs for cursor before SET_CURSOR; need to set cursor region
         CARTA::Point centerPoint;
-        centerPoint.set_x(imageShape(-1)/2);
-        centerPoint.set_y(imageShape(0)/2);
+        centerPoint.set_x(imageShape(0)/2);
+        centerPoint.set_y(imageShape(1)/2);
         setCursorRegion(regionId, centerPoint);
     }
     if (regions.count(regionId)) {
@@ -725,7 +739,7 @@ void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* hi
             if (reqChannel==-1) {
                 reqChannels.push_back(currentChannel());
             } else if (reqChannel == -2) { // all channels
-                for (size_t i=0; i<imageShape(2); ++i)
+                for (size_t i=0; i<imageShape(chanAxis); ++i)
                    reqChannels.push_back(i);
             } else {
                 reqChannels.push_back(reqChannel);

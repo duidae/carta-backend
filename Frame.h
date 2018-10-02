@@ -34,7 +34,7 @@ private:
     std::unique_ptr<carta::FileLoader> loader;
     casacore::IPosition imageShape; // (width, height, depth, stokes)
     size_t ndims;
-    int stokesAxis;
+    int stokesAxis, chanAxis;
     std::vector<std::vector<ChannelStats>> channelStats;
 
     // set image view 
