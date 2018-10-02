@@ -467,8 +467,10 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
         log(uuid, "No file loaded");
         return false;
     } else {
-        size_t depth(ndims>2 ? imageShape(2) : 1);
-        size_t nstokes(ndims>3 ? imageShape(3) : 1);
+        int chanAxis(2);
+        if (stokesAxis==2) chanAxis=3;
+        size_t depth(ndims>2 ? imageShape(chanAxis) : 1);
+        size_t nstokes(ndims>3 ? imageShape(stokesAxis) : 1);
         if (newChannel < 0 || newChannel >= depth || newStokes < 0 || newStokes >= nstokes) {
             log(uuid, "Channel {} (stokes {}) is invalid in file {}", newChannel, newStokes, filename);
             return false;
@@ -770,19 +772,19 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
             newProfile->set_start(0);
             // get <axis, stokes> for slicing image data
             std::pair<int,int> axisStokes = region->getSpatialProfileReq(i);
-	    std::vector<float> profile;
-	    if (axisStokes.second == currentStokes()) {
+            std::vector<float> profile;
+            if (axisStokes.second == currentStokes()) {
                 // use stored channel matrix 
-		switch (axisStokes.first) {
+                switch (axisStokes.first) {
                     case 0: { // x
                         profile = channelCache.column(y).tovector();
                         newProfile->set_end(imageShape(0));
-			break;
+                        break;
                     }
                     case 1: { // y
                         profile = channelCache.row(x).tovector();
                         newProfile->set_end(imageShape(1));
-			break;
+                        break;
                     }
                 }
             } else {
