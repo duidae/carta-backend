@@ -158,8 +158,8 @@ bool Frame::loadImageChannelStats(bool loadPercentiles) {
         return false;
     }
 
-    size_t depth(chanAxis>0 ? imageShape(chanAxis) : 1);
-    size_t nstokes(stokesAxis>0 ? imageShape(stokesAxis) : 1);
+    size_t depth(chanAxis>=0 ? imageShape(chanAxis) : 1);
+    size_t nstokes(stokesAxis>=0 ? imageShape(stokesAxis) : 1);
     channelStats.resize(nstokes);
     for (auto i = 0; i < nstokes; i++) {
         channelStats[i].resize(depth);
@@ -472,8 +472,8 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
         log(uuid, "No file loaded");
         return false;
     } else {
-        size_t depth(chanAxis>0 ? imageShape(chanAxis) : 1);
-        size_t nstokes(stokesAxis>0 ? imageShape(stokesAxis) : 1);
+        size_t depth(chanAxis>=0 ? imageShape(chanAxis) : 1);
+        size_t nstokes(stokesAxis>=0 ? imageShape(stokesAxis) : 1);
         if (newChannel < 0 || newChannel >= depth || newStokes < 0 || newStokes >= nstokes) {
             log(uuid, "Channel {} (stokes {}) is invalid in file {}", newChannel, newStokes, filename);
             return false;
@@ -481,12 +481,21 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
     }
     // update channelCache with new chan and stokes
     getChannelMatrix(channelCache, newChannel, newStokes);
-    stokesIndex = newStokes;
-    channelIndex = newChannel;
 
     //update Histogram: use current channel
-    std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-    setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+    if (newChannel != channelIndex) {
+        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+        setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+    }
+
+    // update Spatial requirements with channel/stokes
+    if ((newChannel != currentChannel()) || (newStokes != currentStokes())) {
+        std::vector<std::string> spatialProfiles;
+        setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
+    }
+
+    stokesIndex = newStokes;
+    channelIndex = newChannel;
     return true;
 }
 
@@ -708,15 +717,16 @@ bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::st
         centerPoint.set_y(imageShape(1)/2);
         setCursorRegion(regionId, centerPoint);
     }
+    int nstokes(stokesAxis>=0 ? imageShape(stokesAxis) : 1);
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         if (profiles.empty()) {  // default to ["x", "y"]
             std::vector<std::string> defaultProfiles;
             defaultProfiles.push_back("x");
             defaultProfiles.push_back("y");
-            return region->setSpatialRequirements(defaultProfiles, imageShape, currentStokes());
+            return region->setSpatialRequirements(defaultProfiles, nstokes, currentStokes());
         } else {
-            return region->setSpatialRequirements(profiles, imageShape, currentStokes());
+            return region->setSpatialRequirements(profiles, nstokes, currentStokes());
         }
     } else {
         // TODO: error handling

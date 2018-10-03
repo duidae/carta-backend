@@ -300,11 +300,16 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
     auto fileId(message.file_id());
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
+	size_t newChannel(message.channel()), newStokes(message.stokes());
+	bool channelChanged(newChannel != frame->currentChannel()),
+	     stokesChanged(newStokes != frame->currentStokes());
         if (frame->setImageChannels(message.channel(), message.stokes())) {
             // RESPONSE: updated histogram
             // Histogram message now managed by the raster image data
             RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
             sendRasterImageData(fileId, requestId, histogramData);
+	    if (channelChanged || stokesChanged)
+                sendSpatialProfileData(fileId, CURSOR_REGION_ID);
         } else {
             // TODO: Error handling on bounds
         }

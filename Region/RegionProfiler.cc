@@ -5,11 +5,10 @@
 using namespace carta;
 
 bool RegionProfiler::setSpatialRequirements(const std::vector<std::string>& profiles,
-            const casacore::IPosition& imshape, const int defaultStokes) {
+            const int nstokes, const int defaultStokes) {
     // process profile strings into pairs <axis, stokes>
     m_profiles.clear();
     m_profilePairs.clear();
-    int nstokes(imshape.size()>3 ? imshape(3) : 1);
     for (auto profile : profiles) {
         if (profile.empty() || profile.size() > 2) // ignore invalid profile string
             continue;

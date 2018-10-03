@@ -34,7 +34,7 @@ public:
 
     // pass through to RegionProfiler
     bool setSpatialRequirements(const std::vector<std::string>& profiles,
-        const casacore::IPosition& imshape, const int defaultStokes);
+        const int nstokes, const int defaultStokes);
     size_t numSpatialProfiles();
     std::pair<int,int> getSpatialProfileReq(int profileIndex);
     std::string getSpatialProfileStr(int profileIndex);

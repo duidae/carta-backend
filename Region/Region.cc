@@ -49,8 +49,8 @@ void Region::fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<f
 // RegionProfiler
 
 bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
-        const casacore::IPosition& imshape, const int defaultStokes) {
-    return m_profiler->setSpatialRequirements(profiles, imshape, defaultStokes);
+        const int nstokes, const int defaultStokes) {
+    return m_profiler->setSpatialRequirements(profiles, nstokes, defaultStokes);
 }
 
 CARTA::Point Region::getControlPoint(int pointIndex) {
