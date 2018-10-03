@@ -479,23 +479,25 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
             return false;
         }
     }
+    bool channelChanged(newChannel != currentChannel()),
+	 stokesChanged(newStokes != currentStokes());
     // update channelCache with new chan and stokes
     getChannelMatrix(channelCache, newChannel, newStokes);
+    stokesIndex = newStokes;
+    channelIndex = newChannel;
 
     //update Histogram: use current channel
-    if (newChannel != channelIndex) {
+    if (channelChanged) {
         std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
         setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
     }
 
-    // update Spatial requirements with channel/stokes
-    if ((newChannel != currentChannel()) || (newStokes != currentStokes())) {
+    // update Spatial requirements with current channel/stokes
+    if (channelChanged || stokesChanged) {
         std::vector<std::string> spatialProfiles;
         setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
     }
 
-    stokesIndex = newStokes;
-    channelIndex = newChannel;
     return true;
 }
 
