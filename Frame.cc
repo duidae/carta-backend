@@ -710,7 +710,7 @@ bool Frame::setRegionHistogramRequirements(int regionId,
 
 bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles) {
     // set requested spatial profiles e.g. ["Qx", "Uy"] or just ["x","y"] to use current stokes
-    if (!regions.count(regionId) && regionId==-1) {
+    if (!regions.count(regionId) && regionId==0) {
         // frontend sends spatial reqs for cursor before SET_CURSOR; need to set cursor region
         CARTA::Point centerPoint;
         centerPoint.set_x(imageShape(0)/2);
