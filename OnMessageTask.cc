@@ -81,6 +81,11 @@ tbb::task* OnMessageTask::execute() {
         if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
             session->onSetHistogramRequirements(message, requestId);
         }
+    } else if (eventName == "SET_SPECTRAL_REQUIREMENTS") {
+        CARTA::SetSpectralRequirements message;
+        if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+            session->onSetSpectralRequirements(message, requestId);
+        }
     } else {
         fmt::print("Unknown event type {}\n", eventName);
     }

@@ -6,6 +6,7 @@
 
 #include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/spatial_profile.pb.h>
+#include <carta-protobuf/spectral_profile.pb.h>
 #include "ImageData/FileLoader.h"
 #include "Region/Region.h"
 
@@ -92,8 +93,11 @@ public:
     bool setRegionHistogramRequirements(int regionId,
         const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histograms);
     bool setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles);
+    bool setRegionSpectralRequirements(int regionId,
+        const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles);
 
     // get region histograms, profiles
     void fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData);
     void fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
+    void fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData);
 };

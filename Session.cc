@@ -304,12 +304,14 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
 	bool channelChanged(newChannel != frame->currentChannel()),
 	     stokesChanged(newStokes != frame->currentStokes());
         if (frame->setImageChannels(message.channel(), message.stokes())) {
-            // RESPONSE: updated histogram
+            // RESPONSE: updated histogram, spatial profile, spectral profile
             // Histogram message now managed by the raster image data
             RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
             sendRasterImageData(fileId, requestId, histogramData);
 	    if (channelChanged || stokesChanged)
                 sendSpatialProfileData(fileId, CURSOR_REGION_ID);
+	    if (stokesChanged)
+                sendSpectralProfileData(fileId, CURSOR_REGION_ID);
         } else {
             // TODO: Error handling on bounds
         }
@@ -328,6 +330,7 @@ void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
         } else {
             // RESPONSE
             sendSpatialProfileData(fileId, CURSOR_REGION_ID);
+            sendSpectralProfileData(fileId, CURSOR_REGION_ID);
         }
     } else {
         // TODO: error handling
@@ -360,6 +363,22 @@ void Session::onSetHistogramRequirements(const CARTA::SetHistogramRequirements& 
         // TODO: error handling
     }
 }
+
+void Session::onSetSpectralRequirements(const CARTA::SetSpectralRequirements& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        auto regionId = message.region_id();
+        frame->setRegionSpectralRequirements(regionId,
+	    vector<CARTA::SetSpectralRequirements_SpectralConfig>(message.spectral_profiles().begin(),
+            message.spectral_profiles().end()));
+        // RESPONSE
+        sendSpectralProfileData(fileId, regionId);
+    } else {
+        // TODO: error handling
+    }
+}
+
 
 // ******** SEND DATA STREAMS *********
 
@@ -459,6 +478,16 @@ void Session::sendSpatialProfileData(int fileId, int regionId) {
     }
 }
 
+void Session::sendSpectralProfileData(int fileId, int regionId) {
+    if (frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        CARTA::SpectralProfileData spectralProfileData;
+        spectralProfileData.set_file_id(fileId);
+        spectralProfileData.set_region_id(regionId);
+        frame->fillSpectralProfileData(regionId, spectralProfileData);
+        sendEvent("SPECTRAL_PROFILE_DATA", 0, spectralProfileData);
+    }
+}
 
 // *********************************************************************************
 // SEND uWEBSOCKET MESSAGES

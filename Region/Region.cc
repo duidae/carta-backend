@@ -48,6 +48,8 @@ void Region::fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<f
 // ***********************************
 // RegionProfiler
 
+// spatial
+
 bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
         const int nstokes, const int defaultStokes) {
     return m_profiler->setSpatialRequirements(profiles, nstokes, defaultStokes);
@@ -71,3 +73,31 @@ std::pair<int,int> Region::getSpatialProfileReq(int profileIndex) {
 std::string Region::getSpatialProfileStr(int profileIndex) {
     return m_profiler->getSpatialProfileStr(profileIndex);
 }
+
+// spectral
+
+bool Region::setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles,
+        const int nstokes, const int defaultStokes) {
+    return m_profiler->setSpectralRequirements(profiles, nstokes, defaultStokes);
+}
+
+size_t Region::numSpectralProfiles() {
+    return m_profiler->numSpectralProfiles();
+}
+
+int Region::getSpectralConfigStokes(int profileIndex) {
+    return m_profiler->getSpectralConfigStokes(profileIndex);
+}
+
+CARTA::SetSpectralRequirements_SpectralConfig Region::getSpectralConfig(int profileIndex) {
+    return m_profiler->getSpectralConfig(profileIndex);
+}
+
+void Region::setSpectralLattice(const casacore::SubLattice<float>& lattice) {
+    m_profiler->setSpectralLattice(lattice);
+}
+
+void Region::getProfileStats(std::vector<float>& statistic, CARTA::StatsType type) {
+    return m_profiler->getStats(statistic, type);
+}
+

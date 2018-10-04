@@ -1,8 +1,7 @@
 #pragma once
 
-#include <casacore/images/Images/HDF5Image.h>
-#include <casacore/images/Images/ImageInterface.h>
 #include <casacore/images/Images/ImageOpener.h>
+#include <casacore/images/Images/ImageInterface.h>
 #include <string>
 #include <memory>
 

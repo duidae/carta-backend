@@ -25,19 +25,29 @@ public:
     // get Region parameters
     CARTA::Point getControlPoint(int pointIndex=0);
 
-    // pass through to RegionStats
+    // Histogram: pass through to RegionStats
     bool setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
     CARTA::SetHistogramRequirements_HistogramConfig getHistogramConfig(int histogramIndex);
     size_t numHistogramConfigs();
     void fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<float>& chanMatrix,
         const size_t chanIndex, const size_t stokesIndex);
 
-    // pass through to RegionProfiler
+    // Spatial: pass through to RegionProfiler
     bool setSpatialRequirements(const std::vector<std::string>& profiles,
         const int nstokes, const int defaultStokes);
     size_t numSpatialProfiles();
     std::pair<int,int> getSpatialProfileReq(int profileIndex);
     std::string getSpatialProfileStr(int profileIndex);
+
+    // Spectral: pass through to RegionProfiler
+    bool setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles,
+        const int nstokes, const int defaultStokes);
+    size_t numSpectralProfiles();
+    CARTA::SetSpectralRequirements_SpectralConfig getSpectralConfig(int profileIndex);
+    int getSpectralConfigStokes(int profileIndex);
+    // set lattice once, then get stats for it
+    void setSpectralLattice(const casacore::SubLattice<float>& lattice);
+    void getProfileStats(std::vector<float>& statistic, CARTA::StatsType type);
 
 private:
 
