@@ -4,7 +4,6 @@
 #include <casacore/lattices/Lattices/HDF5Lattice.h>
 #include <H5Cpp.h>
 #include <H5File.h>
-#include <casacore/images/Images/HDF5Image.h>
 #include <string>
 #include <unordered_map>
 

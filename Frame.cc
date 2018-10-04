@@ -31,11 +31,11 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
             return;
         }
 
-	// determine chan and stokes axes
+        // determine chan and stokes axes
         stokesAxis = loader->stokesAxis();
-	if (ndims < 3) chanAxis = -1;
-	else chanAxis = 2;
-	if (ndims == 4 && stokesAxis==2) chanAxis=3;
+        if (ndims < 3) chanAxis = -1;
+        else chanAxis = 2;
+        if (ndims == 4 && stokesAxis==2) chanAxis=3;
 
         log(uuid, "Opening image with dimensions: {}", imageShape);
         // string axesInfo = fmt::format("Opening image with dimensions: {}", dimensions);
@@ -481,44 +481,55 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
             return false;
         }
     }
-    bool channelChanged(newChannel != currentChannel()),
-         stokesChanged(newStokes != currentStokes());
-    // update channelCache with new chan and stokes
-    getChannelMatrix(channelCache, newChannel, newStokes);
-    stokesIndex = newStokes;
-    channelIndex = newChannel;
 
-    if (channelChanged) {
-        // update image Histogram and cursor Spatial Reqs: current channel
-        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-        setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+    std::pair<size_t,size_t> chanStokes(newChannel, newStokes);
+    setImageChannelsQueue.push(chanStokes);
+    std::unique_lock<std::mutex> guard(setImageChannelsMutex, std::defer_lock);
+    while(guard.try_lock() && setImageChannelsQueue.try_pop(chanStokes)) {
+        std::tie(newChannel, newStokes) = chanStokes;
+        bool channelChanged(newChannel != currentChannel()),
+            stokesChanged(newStokes != currentStokes());
+        // update channelCache with new chan and stokes
+        getChannelMatrix(channelCache, newChannel, newStokes);
+        stokesIndex = newStokes;
+        channelIndex = newChannel;
 
-        if (!regions.count(CURSOR_REGION_ID)) {
-            // create cursor region; also sets spatial reqs
-            CARTA::Point centerPoint;
-            centerPoint.set_x(imageShape(0)/2);
-            centerPoint.set_y(imageShape(1)/2);
-            setCursorRegion(CURSOR_REGION_ID, centerPoint);
-        } else {
-            // update existing cursor region
-            std::vector<std::string> spatialProfiles;
-            setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
-	}
-    }
-
-    if (stokesChanged) {
-        // update cursor Spectral Reqs: current stokes
-        if (!regions.count(CURSOR_REGION_ID)) {
-            // create cursor region; also sets spectral reqs
-            CARTA::Point centerPoint;
-            centerPoint.set_x(imageShape(0)/2);
-            centerPoint.set_y(imageShape(1)/2);
-            setCursorRegion(CURSOR_REGION_ID, centerPoint);
-        } else {
-            std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
-            setRegionSpectralRequirements(CURSOR_REGION_ID, spectralProfiles);
+        // update Histogram with current channel
+        if (channelChanged) {
+            std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+            setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
         }
+
+        // update Spatial requirements with current channel/stokes
+        if (channelChanged || stokesChanged) {
+            if (!regions.count(CURSOR_REGION_ID)) {
+                // create cursor region; also sets spatial reqs
+                CARTA::Point centerPoint;
+                centerPoint.set_x(imageShape(0)/2);
+                centerPoint.set_y(imageShape(1)/2);
+                setCursorRegion(CURSOR_REGION_ID, centerPoint);
+            } else { // just set spatial reqs
+                std::vector<std::string> spatialProfiles;
+                setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
+            }
+        }
+
+        // update Spectral requirements with current stokes
+        if (stokesChanged) {
+            if (!regions.count(CURSOR_REGION_ID)) {
+                // create cursor region; also sets spectral reqs
+                CARTA::Point centerPoint;
+                centerPoint.set_x(imageShape(0)/2);
+                centerPoint.set_y(imageShape(1)/2);
+                setCursorRegion(CURSOR_REGION_ID, centerPoint);
+            } else {
+                std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
+                setRegionSpectralRequirements(CURSOR_REGION_ID, spectralProfiles);
+            }
+        }
+        guard.unlock();
     }
+
     return true;
 }
 
@@ -714,6 +725,7 @@ void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
         // spatial requirements
         std::vector<std::string> spatialProfiles;
         setRegionSpatialRequirements(regionId, spatialProfiles);
+
         // spectral requirements
         std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
         setRegionSpectralRequirements(regionId, spectralProfiles);
@@ -908,9 +920,9 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
         // set profile parameters
         int currStokes(currentStokes());
         profileData.set_stokes(currStokes);
-        profileData.set_progress(1.0);
+        profileData.set_progress(1.0); // for now (cursor), send all at once
         // Set channel vals
-        // get slicer 
+        // get slicer
         CARTA::Point ctrlPt = region->getControlPoint();
         int x(ctrlPt.x()), y(ctrlPt.y());
         casacore::Slicer lattSlicer;
@@ -926,18 +938,18 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
             std::string coordinate(config.coordinate());
             // get sublattice for stokes requested in profile
             int profileStokes(region->getSpectralConfigStokes(i));
-            if (profileStokes != currStokes) { 
+            if (profileStokes != currStokes) {
                 getProfileSlicer(lattSlicer, x, y, -1, profileStokes);
             }
             casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
-	    region->setSpectralLattice(subLattice);
+            region->setSpectralLattice(subLattice);
             // one SpectralProfile per StatsType
             for (size_t j=0; j<config.stats_types_size(); ++j) {
                 auto newProfile = profileData.add_profiles();
                 newProfile->set_coordinate(coordinate);
                 CARTA::StatsType statType(config.stats_types(j));
                 newProfile->set_stats_type(statType);
-		// get statistics for requested stokes profile
+                // get statistics for requested stokes profile
                 if (statType != CARTA::StatsType::None) {
                     std::vector<float> svalues;
                     region->getProfileStats(svalues, statType);
