@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <string>
 #include <memory>
+#include <mutex>
+#include <tbb/concurrent_queue.h>
 
 #include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/spatial_profile.pb.h>
@@ -51,6 +53,9 @@ private:
     // Region
     // <region_id, Region>: one Region per ID
     std::unordered_map<int, std::unique_ptr<carta::Region>> regions;
+
+    tbb::concurrent_queue<std::pair<size_t,size_t>> setImageChannelsQueue;
+    std::mutex setImageChannelsMutex;
 
     bool loadImageChannelStats(bool loadPercentiles = false);
     void setImageRegion(); // set region for entire image

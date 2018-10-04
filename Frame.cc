@@ -479,23 +479,30 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
             return false;
         }
     }
-    bool channelChanged(newChannel != currentChannel()),
-	 stokesChanged(newStokes != currentStokes());
-    // update channelCache with new chan and stokes
-    getChannelMatrix(channelCache, newChannel, newStokes);
-    stokesIndex = newStokes;
-    channelIndex = newChannel;
+    std::pair<size_t,size_t> chanStokes(newChannel, newStokes);
+    setImageChannelsQueue.push(chanStokes);
+    std::unique_lock<std::mutex> guard(setImageChannelsMutex, std::defer_lock);
+    while(guard.try_lock() && setImageChannelsQueue.try_pop(chanStokes)) {
+        std::tie(newChannel, newStokes) = chanStokes;
+        bool channelChanged(newChannel != currentChannel()),
+            stokesChanged(newStokes != currentStokes());
+        // update channelCache with new chan and stokes
+        getChannelMatrix(channelCache, newChannel, newStokes);
+        stokesIndex = newStokes;
+        channelIndex = newChannel;
 
-    //update Histogram: use current channel
-    if (channelChanged) {
-        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-        setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
-    }
+        //update Histogram: use current channel
+        if (channelChanged) {
+            std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+            setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+        }
 
-    // update Spatial requirements with current channel/stokes
-    if (channelChanged || stokesChanged) {
-        std::vector<std::string> spatialProfiles;
-        setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
+        // update Spatial requirements with current channel/stokes
+        if (channelChanged || stokesChanged) {
+            std::vector<std::string> spatialProfiles;
+            setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
+        }
+        guard.unlock();
     }
 
     return true;
