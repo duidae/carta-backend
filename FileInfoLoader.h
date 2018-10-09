@@ -25,7 +25,7 @@ private:
     bool fillFITSExtFileInfo(CARTA::FileInfoExtended* extInfo, std::string& hdu, std::string& message);
     bool fillCASAExtFileInfo(CARTA::FileInfoExtended* extInfo, std::string& message);
     void addComputedEntries(CARTA::FileInfoExtended* extInfo, const std::string& coordinateTypeX,
-        const std::string& coordinateTypeY, const std::string& radeSys);
+        const std::string& coordinateTypeY, const std::string& radeSys, const bool stokesIsAxis4);
 
     std::string m_file;
     casacore::ImageOpener::ImageTypes m_type; 
