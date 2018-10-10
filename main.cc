@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <tbb/task_scheduler_init.h>
+#include "AnimationQueue.h"
 #include "Session.h"
 #include "OnMessageTask.h"
 
@@ -19,6 +20,7 @@ using namespace uWS;
 namespace po = boost::program_options;
 
 unordered_map<WebSocket<SERVER>*, Session*> sessions;
+unordered_map<WebSocket<SERVER>*, carta::AnimationQueue*> animationQueues;
 unordered_map<string, vector<string>> permissionsMap;
 boost::uuids::random_generator uuid_gen;
 Hub h;
@@ -63,6 +65,7 @@ void onConnect(WebSocket<SERVER>* ws, HttpRequest httpRequest) {
             }
         });
     sessions[ws] = new Session(ws, uuid_gen(), permissionsMap, usePermissions, baseFolder, outgoing, verbose);
+    animationQueues[ws] = new carta::AnimationQueue(sessions[ws]);
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
@@ -77,6 +80,8 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
     if (session) {
         delete session;
         sessions.erase(ws);
+        delete animationQueues[ws];
+        animationQueues.erase(ws);
     }
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
@@ -95,7 +100,17 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
 
     if (opCode == OpCode::BINARY) {
         if (length > 36) {
-            OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(session, rawMessage, length);
+            static const size_t max_len = 32;
+            std::string eventName(rawMessage, std::min(std::strlen(rawMessage), max_len));
+            uint32_t requestId = *reinterpret_cast<uint32_t*>(rawMessage+32);
+            std::vector<char> eventPayload(&rawMessage[36], &rawMessage[length]);
+            OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(
+                session, eventName, eventPayload, requestId, animationQueues[ws]);
+            if(eventName == "SET_IMAGE_CHANNELS") {
+                CARTA::SetImageChannels message;
+                message.ParseFromArray(eventPayload.data(), eventPayload.size());
+                animationQueues[ws]->addRequest(message, requestId);
+            }
             tbb::task::enqueue(*omt);
         }
     } else {

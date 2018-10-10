@@ -29,7 +29,8 @@ set(SOURCE_FILES
   Region/RegionStats.cc
   Region/RegionProfiler.cc
   Region/Histogram.cc
-  OnMessageTask.cc)
+  OnMessageTask.cc
+  AnimationQueue.cc)
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
 target_link_libraries(hdf5_image_viewer ${LINK_LIBS})

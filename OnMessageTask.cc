@@ -21,11 +21,14 @@ std::string getEventName(char* rawMessage) {
     return std::string(rawMessage, std::min(std::strlen(rawMessage), max_len));
 }
 
-OnMessageTask::OnMessageTask(Session *session_, char *rawMessage_, size_t length_)
+OnMessageTask::OnMessageTask(Session *session_, std::string eventName_,
+                             std::vector<char> eventPayload_, uint32_t requestId_,
+                             carta::AnimationQueue *aqueue_)
     : session(session_),
-      eventName(getEventName(rawMessage_)),
-      requestId(*reinterpret_cast<uint32_t*>(rawMessage_+32)),
-      eventPayload(&rawMessage_[36], &rawMessage_[length_])
+      eventName(eventName_),
+      requestId(requestId_),
+      eventPayload(eventPayload_),
+      aqueue(aqueue_)
 {}
 
 tbb::task* OnMessageTask::execute() {
@@ -64,7 +67,7 @@ tbb::task* OnMessageTask::execute() {
     } else if (eventName == "SET_IMAGE_CHANNELS") {
         CARTA::SetImageChannels message;
         if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
-            session->onSetImageChannels(message, requestId);
+            aqueue->executeOne();
         }
     } else if (eventName == "SET_CURSOR") {
         CARTA::SetCursor message;
