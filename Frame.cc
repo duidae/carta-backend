@@ -482,52 +482,45 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
         }
     }
 
-    std::pair<size_t,size_t> chanStokes(newChannel, newStokes);
-    setImageChannelsQueue.push(chanStokes);
-    std::unique_lock<std::mutex> guard(setImageChannelsMutex, std::defer_lock);
-    while(guard.try_lock() && setImageChannelsQueue.try_pop(chanStokes)) {
-        std::tie(newChannel, newStokes) = chanStokes;
-        bool channelChanged(newChannel != currentChannel()),
-            stokesChanged(newStokes != currentStokes());
-        // update channelCache with new chan and stokes
-        getChannelMatrix(channelCache, newChannel, newStokes);
-        stokesIndex = newStokes;
-        channelIndex = newChannel;
+    bool channelChanged(newChannel != currentChannel()),
+        stokesChanged(newStokes != currentStokes());
+    // update channelCache with new chan and stokes
+    getChannelMatrix(channelCache, newChannel, newStokes);
+    stokesIndex = newStokes;
+    channelIndex = newChannel;
 
-        // update Histogram with current channel
-        if (channelChanged) {
-            std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-            setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
-        }
+    // update Histogram with current channel
+    if (channelChanged) {
+        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
+        setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
+    }
 
-        // update Spatial requirements with current channel/stokes
-        if (channelChanged || stokesChanged) {
-            if (!regions.count(CURSOR_REGION_ID)) {
-                // create cursor region; also sets spatial reqs
-                CARTA::Point centerPoint;
-                centerPoint.set_x(imageShape(0)/2);
-                centerPoint.set_y(imageShape(1)/2);
-                setCursorRegion(CURSOR_REGION_ID, centerPoint);
-            } else { // just set spatial reqs
-                std::vector<std::string> spatialProfiles;
-                setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
-            }
+    // update Spatial requirements with current channel/stokes
+    if (channelChanged || stokesChanged) {
+        if (!regions.count(CURSOR_REGION_ID)) {
+            // create cursor region; also sets spatial reqs
+            CARTA::Point centerPoint;
+            centerPoint.set_x(imageShape(0)/2);
+            centerPoint.set_y(imageShape(1)/2);
+            setCursorRegion(CURSOR_REGION_ID, centerPoint);
+        } else { // just set spatial reqs
+            std::vector<std::string> spatialProfiles;
+            setRegionSpatialRequirements(CURSOR_REGION_ID, spatialProfiles);
         }
+    }
 
-        // update Spectral requirements with current stokes
-        if (stokesChanged) {
-            if (!regions.count(CURSOR_REGION_ID)) {
-                // create cursor region; also sets spectral reqs
-                CARTA::Point centerPoint;
-                centerPoint.set_x(imageShape(0)/2);
-                centerPoint.set_y(imageShape(1)/2);
-                setCursorRegion(CURSOR_REGION_ID, centerPoint);
-            } else {
-                std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
-                setRegionSpectralRequirements(CURSOR_REGION_ID, spectralProfiles);
-            }
+    // update Spectral requirements with current stokes
+    if (stokesChanged) {
+        if (!regions.count(CURSOR_REGION_ID)) {
+            // create cursor region; also sets spectral reqs
+            CARTA::Point centerPoint;
+            centerPoint.set_x(imageShape(0)/2);
+            centerPoint.set_y(imageShape(1)/2);
+            setCursorRegion(CURSOR_REGION_ID, centerPoint);
+        } else {
+            std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
+            setRegionSpectralRequirements(CURSOR_REGION_ID, spectralProfiles);
         }
-        guard.unlock();
     }
 
     return true;
