@@ -84,6 +84,39 @@ bool FileInfoLoader::getHduList(FileInfo* fileInfo, const std::string& filename)
 //#################################################################################
 // FILE INFO EXTENDED
 
+// make strings for computed entries
+void FileInfoLoader::makeRadesysStr(std::string& radeSys, const std::string& equinox) {
+    // append equinox to radesys
+    if (!radeSys.empty() && !equinox.empty()) {
+        string prefix;
+        if (radeSys=="FK4") prefix="B";
+        else if (radeSys=="FK5") prefix="J";
+        radeSys.append(", " + prefix + equinox);
+    }
+}
+
+std::string FileInfoLoader::makeDegStr(const std::string& xType, double crval1, double crval2,
+    const std::string& cunit1, const std::string& cunit2) {
+    // make coordinate angle string for (RA, DEC), (GLON, GLAT)
+    std::string degStr;
+    if (!cunit1.empty() && !cunit2.empty()) {
+        if ((xType.find("RA") == std::string::npos) && (xType.find("GLON") == std::string::npos))
+            return degStr; // no deg string for e.g. VOPT
+        casacore::MVAngle::formatTypes xformat(casacore::MVAngle::ANGLE);
+        if (xType.find("RA") != std::string::npos)
+            xformat = casacore::MVAngle::TIME;
+        casacore::Quantity quant1(crval1, cunit1);
+        casacore::MVAngle mva1(quant1);
+        std::string crtime1(mva1.string(xformat, 10));
+        casacore::Quantity quant2(crval2, cunit2);
+        casacore::MVAngle mva2(quant2);
+        std::string crtime2(mva2.string(casacore::MVAngle::ANGLE, 10));
+        degStr = fmt::format("[{}, {}]", crtime1, crtime2);
+    }
+    return degStr;
+}
+
+// fill FileExtInfo depending on image type
 bool FileInfoLoader::fillFileExtInfo(FileInfoExtended* extInfo, string& hdu, string& message) {
     bool extInfoOK(false);
     switch(m_type) {
@@ -140,7 +173,9 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
             extendedInfo->set_height(dims[ndims - 2]);
 
             // if in header, save values for computed entries
-            string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys;
+            std::string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys, equinox, specSys, bunit,
+                crpix1, crpix2, cunit1, cunit2;
+            double crval1(0.0), crval2(0.0), cdelt1(0.0), cdelt2(0.0);
 
             // header_entries
             H5O_info_t groupInfo;
@@ -163,6 +198,14 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
                         coordinateType4 = headerEntry->value();
                     else if (headerEntry->name() == "RADESYS") 
                         radeSys = headerEntry->value();
+                    else if (headerEntry->name() == "SPECSYS") 
+                        specSys = headerEntry->value();
+                    else if (headerEntry->name() == "BUNIT") 
+                        bunit = headerEntry->value();
+                    else if (headerEntry->name() == "CUNIT1") 
+                        cunit1 = headerEntry->value();
+                    else if (headerEntry->name() == "CUNIT2") 
+                        cunit2 = headerEntry->value();
                 } else if (typeClass == H5T_INTEGER) {
                     int64_t valueInt;
                     DataType intType(PredType::NATIVE_INT64);
@@ -177,6 +220,20 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
                     headerEntry->set_numeric_value(numericValue);
                     headerEntry->set_entry_type(EntryType::FLOAT);
                     *headerEntry->mutable_value() = fmt::format("{:f}", numericValue);
+                    if (headerEntry->name() == "EQUINOX")
+                        equinox = std::to_string(static_cast<int>(numericValue));
+                    else if (headerEntry->name() == "CRVAL1")
+                        crval1 = numericValue;
+                    else if (headerEntry->name() == "CRVAL2")
+                        crval2 = numericValue;
+                    else if (headerEntry->name() == "CRPIX1")
+                        crpix1 = std::to_string(static_cast<int>(numericValue)); 
+                    else if (headerEntry->name() == "CRPIX2")
+                        crpix2 = std::to_string(static_cast<int>(numericValue)); 
+                    else if (headerEntry->name() == "CDELT1")
+                        cdelt1 = numericValue; 
+                    else if (headerEntry->name() == "CDELT2")
+                        cdelt2 = numericValue; 
                 }
             }
             // depth, stokes
@@ -195,8 +252,20 @@ bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string&
                     stokesIsAxis4 = false;
                 }
             }
-            // computed_entries
-            addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys, stokesIsAxis4);
+            // make computed entries strings
+            std::string crPixels, crCoords, crDegStr, axisInc;
+            if (!crpix1.empty() && !crpix2.empty())
+                crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
+            if (!(crval1 == 0.0 && crval2 == 0.0)) 
+                crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
+            crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
+            if (!(cdelt1 == 0.0 && cdelt2 == 0.0)) 
+                axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
+            makeRadesysStr(radeSys, equinox);
+
+            // fill computed_entries
+            addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, crPixels, crCoords, crDegStr,
+                radeSys, specSys, bunit, axisInc, stokesIsAxis4);
         } else {
             message = "File is missing DATA dataset";
             extInfoOK = false;
@@ -232,7 +301,9 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
         extendedInfo->add_stokes_vals(""); // not in header
 
         // if in header, save values for computed entries
-        string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys;
+        std::string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys, equinox, specSys,
+            bunit, crpix1, crpix2, cunit1, cunit2;
+        double crval1(0.0), crval2(0.0), cdelt1(0.0), cdelt2(0.0);
 
         // set header entries 
         for (casacore::uInt field=0; field < hduEntries.nfields(); ++field) {
@@ -253,6 +324,14 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
                             coordinateType4 = headerEntry->value();
                         else if (headerEntry->name() == "RADESYS") 
                             radeSys = headerEntry->value();
+                        else if (headerEntry->name() == "SPECSYS") 
+                            specSys = headerEntry->value();
+                        else if (headerEntry->name() == "BUNIT") 
+                            bunit = headerEntry->value();
+                        else if (headerEntry->name() == "CUNIT1") 
+                            cunit1 = headerEntry->value();
+                        else if (headerEntry->name() == "CUNIT2") 
+                            cunit2 = headerEntry->value();
                         break;
                     }
                     case casacore::TpInt: {
@@ -268,6 +347,20 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
                         *headerEntry->mutable_value() = fmt::format("{}", numericValue);
                         headerEntry->set_entry_type(EntryType::FLOAT);
                         headerEntry->set_numeric_value(numericValue);
+                        if (headerEntry->name() == "EQUINOX")
+                            equinox = std::to_string(static_cast<int>(numericValue));
+                        else if (headerEntry->name() == "CRVAL1")
+                            crval1 = numericValue;
+                        else if (headerEntry->name() == "CRVAL2")
+                            crval2 = numericValue;
+                        else if (headerEntry->name() == "CRPIX1")
+                            crpix1 = std::to_string(static_cast<int>(numericValue));
+                        else if (headerEntry->name() == "CRPIX2")
+                            crpix2 = std::to_string(static_cast<int>(numericValue));
+                        else if (headerEntry->name() == "CDELT1")
+                            cdelt1 = numericValue;
+			else if (headerEntry->name() == "CDELT2")
+                            cdelt2 = numericValue;
                         break;
                     }
                     default:
@@ -276,7 +369,7 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
             }
         }
         // depth, stokes
-	bool stokesIsAxis4(true);
+        bool stokesIsAxis4(true);
         if (dim<4) {
             extendedInfo->set_depth(dim > 2 ? hduEntries.asInt("NAXIS3") : 1);
             extendedInfo->set_stokes(1);
@@ -288,11 +381,23 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
             } else {
                 extendedInfo->set_depth(hduEntries.asInt("NAXIS4"));
                 extendedInfo->set_stokes(hduEntries.asInt("NAXIS3"));
-	        stokesIsAxis4 = false;
+                stokesIsAxis4 = false;
             }
         }
-        // computed_entries
-        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys, stokesIsAxis4);
+        // make strings for computed entries
+        std::string crPixels, crCoords, crDegStr, axisInc;
+        if (!crpix1.empty() && !crpix2.empty())
+            crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
+        if (crval1!=0.0 && crval2!=0.0) 
+            crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
+        crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
+        if (!(cdelt1 == 0.0 && cdelt2 == 0.0)) 
+            axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
+        makeRadesysStr(radeSys, equinox);
+
+        // fill computed_entries
+        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, crPixels, crCoords, crDegStr,
+            radeSys, specSys, bunit, axisInc, stokesIsAxis4);
     } catch (casacore::AipsError& err) {
         message = err.getMesg();
         extInfoOK = false;
@@ -331,7 +436,7 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         extendedInfo->add_stokes_vals(""); // not in header
 
         // if in header, save values for computed entries
-        string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys;
+        std::string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys, specSys, bunit;
 
         // set dims in header entries
         auto headerEntry = extendedInfo->add_header_entries();
@@ -391,7 +496,8 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         // units
         headerEntry = extendedInfo->add_header_entries();
         headerEntry->set_name("BUNIT");
-        *headerEntry->mutable_value() = imSummary.units().getName();
+        bunit = imSummary.units().getName();
+        *headerEntry->mutable_value() = bunit;
         headerEntry->set_entry_type(EntryType::STRING);
         // axes values
         casacore::Vector<casacore::String> axNames(imSummary.axisNames());
@@ -420,27 +526,41 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             headerEntry->set_name("CRVAL"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axRefVal(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
-            headerEntry->set_numeric_value(imShape(i));
+            headerEntry->set_numeric_value(axRefVal(i));
             // increment = CDELT
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CDELT"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axInc(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
-            headerEntry->set_numeric_value(imShape(i));
+            headerEntry->set_numeric_value(axInc(i));
             // ref pix = CRPIX
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CRPIX"+ suffix);
             *headerEntry->mutable_value() = fmt::format("{}", axRefPix(i));
             headerEntry->set_entry_type(EntryType::FLOAT);
-            headerEntry->set_numeric_value(imShape(i));
+            headerEntry->set_numeric_value(axRefPix(i));
             // units = CUNIT
             headerEntry = extendedInfo->add_header_entries();
             headerEntry->set_name("CUNIT"+ suffix);
             *headerEntry->mutable_value() = axUnits(i);
             headerEntry->set_entry_type(EntryType::STRING);
         }
+        // cr coords
+        std::string crpix1(std::to_string(static_cast<int>(axRefPix(0)))),
+            crpix2(std::to_string(static_cast<int>(axRefPix(1)))),
+            cunit1(axUnits(0)), cunit2(axUnits(1));
+        double crval1(axRefVal(0)), crval2(axRefVal(1)), cdelt1(axInc(0)), cdelt2(axInc(1));
+        std::string crPixels, crCoords, crDegStr, axisInc;
+        if (!crpix1.empty() && !crpix2.empty())
+            crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
+        if (crval1!=0.0 && crval2!=0.0) 
+            crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
+        crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
+        if (!(cdelt1==0.0 && cdelt2==0.0)) 
+            axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
+
         // depth, stokes
-	bool stokesIsAxis4(true);
+        bool stokesIsAxis4(true);
         if (dim<4) {
             extendedInfo->set_depth(dim > 2 ? imShape(2) : 1);
             extendedInfo->set_stokes(1);
@@ -452,7 +572,7 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             } else {
                 extendedInfo->set_depth(imShape(3));
                 extendedInfo->set_stokes(imShape(2));
-		stokesIsAxis4 = false;
+                stokesIsAxis4 = false;
             }
         }
         // RESTFRQ
@@ -475,6 +595,7 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             headerEntry->set_name("SPECSYS");
             *headerEntry->mutable_value() = returnStr;
             headerEntry->set_entry_type(EntryType::STRING);
+            specSys = returnStr;
         }
         // telescope
         headerEntry = extendedInfo->add_header_entries();
@@ -494,7 +615,8 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         headerEntry->set_entry_type(EntryType::STRING);
 
         // computed_entries
-        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, radeSys, stokesIsAxis4);
+        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, crPixels, crCoords, crDegStr,
+            radeSys, specSys, bunit, axisInc, stokesIsAxis4);
     } catch (casacore::AipsError& err) {
         if (ccImage != nullptr)
             delete ccImage;
@@ -507,54 +629,115 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
 }
 
 void FileInfoLoader::addComputedEntries(CARTA::FileInfoExtended* extendedInfo, const std::string& coordinateTypeX,
-    const std::string& coordinateTypeY, const std::string& radeSys, const bool stokesIsAxis4) {
-    // computed_entries
-    auto computedEntryName = extendedInfo->add_computed_entries();
+    const std::string& coordinateTypeY, const std::string& crPixels, const std::string& crCoords,
+    const std::string& crDeg, const std::string& radeSys, const std::string& specSys, const std::string& bunit,
+    const std::string& axisInc, const bool stokesIsAxis4) {
+    // add computed_entries to extended info
 
     // name
     casacore::File ccfile(m_file);
     string name(ccfile.path().baseName());
+    auto computedEntryName = extendedInfo->add_computed_entries();
     computedEntryName->set_name("Name");
-    computedEntryName->set_entry_type(EntryType::STRING);
     computedEntryName->set_value(name);
+    computedEntryName->set_entry_type(EntryType::STRING);
 
     // shape
-    auto computedEntryShape = extendedInfo->add_computed_entries();
-    computedEntryShape->set_name("Shape");
-    computedEntryShape->set_entry_type(EntryType::STRING);
     string shapeString;
-    int ndims(extendedInfo->dimensions());
+    int ndims(extendedInfo->dimensions()),
+        nchan(extendedInfo->depth()),
+        nstokes(extendedInfo->stokes());
     switch(ndims) {
         case 2:
             shapeString = fmt::format("[{}, {}]", extendedInfo->width(), extendedInfo->height());
             break;
         case 3:
-            shapeString = fmt::format("[{}, {}, {}]", extendedInfo->width(), extendedInfo->height(),
-                extendedInfo->depth());
+            shapeString = fmt::format("[{}, {}, {}]", extendedInfo->width(), extendedInfo->height(), nchan); 
             break;
-        case 4: 
+        case 4:
             if (stokesIsAxis4) {
                 shapeString = fmt::format("[{}, {}, {}, {}]", extendedInfo->width(), extendedInfo->height(),
-                    extendedInfo->depth(), extendedInfo->stokes());
+                    nchan, nstokes);
             } else {
                 shapeString = fmt::format("[{}, {}, {}, {}]", extendedInfo->width(), extendedInfo->height(),
-                    extendedInfo->stokes(), extendedInfo->depth());
+                    nstokes, nchan);
             }
             break;
     }
+    auto computedEntryShape = extendedInfo->add_computed_entries();
+    computedEntryShape->set_name("Shape");
     computedEntryShape->set_value(shapeString);
+    computedEntryShape->set_entry_type(EntryType::STRING);
 
-    if (coordinateTypeX.length() && coordinateTypeY.length()) {
+    // chan, stokes
+    if (ndims>=3) {
+        auto computedEntryNChan = extendedInfo->add_computed_entries();
+        computedEntryNChan->set_name("Number of channels");
+        computedEntryNChan->set_value(casacore::String::toString(nchan));
+        computedEntryNChan->set_entry_type(EntryType::INT);
+        computedEntryNChan->set_numeric_value(nchan);
+    }
+    if (ndims==4) {
+        auto computedEntryNStokes = extendedInfo->add_computed_entries();
+        computedEntryNStokes->set_name("Number of stokes");
+        computedEntryNStokes->set_value(casacore::String::toString(nstokes));
+        computedEntryNStokes->set_entry_type(EntryType::INT);
+        computedEntryNStokes->set_numeric_value(nstokes);
+    }
+
+    if (!coordinateTypeX.empty() && !coordinateTypeY.empty()) {
         auto computedEntryCoordinateType = extendedInfo->add_computed_entries();
         computedEntryCoordinateType->set_name("Coordinate type");
-        computedEntryCoordinateType->set_entry_type(EntryType::STRING);
         computedEntryCoordinateType->set_value(fmt::format("{}, {}", coordinateTypeX, coordinateTypeY));
+        computedEntryCoordinateType->set_entry_type(EntryType::STRING);
     }
 
-    if (radeSys.length()) {
+    if (!crPixels.empty()) {
+        auto computedEntryCrPixels = extendedInfo->add_computed_entries();
+        computedEntryCrPixels->set_name("Image reference pixels");
+        computedEntryCrPixels->set_value(crPixels);
+        computedEntryCrPixels->set_entry_type(EntryType::STRING);
+    }
+
+    if (!crCoords.empty()) {
+        auto computedEntryCrCoords = extendedInfo->add_computed_entries();
+        computedEntryCrCoords->set_name("Image reference coordinates");
+        computedEntryCrCoords->set_value(crCoords);
+        computedEntryCrCoords->set_entry_type(EntryType::STRING);
+    }
+
+    if (!crDeg.empty()) {
+        auto computedEntryCrDeg = extendedInfo->add_computed_entries();
+        computedEntryCrDeg->set_name("Image ref coords (coord type)");
+        computedEntryCrDeg->set_value(crDeg);
+        computedEntryCrDeg->set_entry_type(EntryType::STRING);
+    }
+
+    if (!radeSys.empty()) {
         auto computedEntryCelestialFrame = extendedInfo->add_computed_entries();
         computedEntryCelestialFrame->set_name("Celestial frame");
-        computedEntryCelestialFrame->set_entry_type(EntryType::STRING);
         computedEntryCelestialFrame->set_value(radeSys);
+        computedEntryCelestialFrame->set_entry_type(EntryType::STRING);
+    }
+
+    if (!specSys.empty()) {
+        auto computedEntrySpectralFrame = extendedInfo->add_computed_entries();
+        computedEntrySpectralFrame->set_name("Spectral frame");
+        computedEntrySpectralFrame->set_value(specSys);
+        computedEntrySpectralFrame->set_entry_type(EntryType::STRING);
+    }
+
+    if (!bunit.empty()) {
+        auto computedEntryPixelUnit = extendedInfo->add_computed_entries();
+        computedEntryPixelUnit->set_name("Pixel unit");
+        computedEntryPixelUnit->set_value(bunit);
+        computedEntryPixelUnit->set_entry_type(EntryType::STRING);
+    }
+    if (!axisInc.empty()) {
+        auto computedEntryAxisInc = extendedInfo->add_computed_entries();
+        computedEntryAxisInc->set_name("Pixel increment");
+        computedEntryAxisInc->set_value(axisInc);
+        computedEntryAxisInc->set_entry_type(EntryType::STRING);
     }
 }
+
