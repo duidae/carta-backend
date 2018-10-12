@@ -3,8 +3,6 @@
 
 #include <memory>
 #include <tbb/tbb.h>
-#include <casacore/coordinates/Coordinates/Coordinate.h>
-#include <casacore/images/Images/LELImageCoord.h>
 
 using namespace carta;
 using namespace std;
@@ -927,27 +925,14 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
         *profileData.mutable_channel_vals() = {zprofile.begin(), zprofile.end()};
         // set stats profiles
         for (size_t i=0; i<region->numSpectralProfiles(); ++i) {
-            CARTA::SetSpectralRequirements_SpectralConfig config(region->getSpectralConfig(i));
-            std::string coordinate(config.coordinate());
             // get sublattice for stokes requested in profile
-            int profileStokes(region->getSpectralConfigStokes(i));
-            if (profileStokes != currStokes) {
-                getProfileSlicer(lattSlicer, x, y, -1, profileStokes);
-            }
-            casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
-            region->setSpectralLattice(subLattice);
-            // one SpectralProfile per StatsType
-            for (size_t j=0; j<config.stats_types_size(); ++j) {
-                auto newProfile = profileData.add_profiles();
-                newProfile->set_coordinate(coordinate);
-                CARTA::StatsType statType(config.stats_types(j));
-                newProfile->set_stats_type(statType);
-                // get statistics for requested stokes profile
-                if (statType != CARTA::StatsType::None) {
-                    std::vector<float> svalues;
-                    region->getProfileStats(svalues, statType);
-                    *newProfile->mutable_vals() = {svalues.begin(), svalues.end()};
+            int profileStokes;
+            if (region->getSpectralConfigStokes(profileStokes, i)) {
+                if (profileStokes != currStokes) {
+                    getProfileSlicer(lattSlicer, x, y, -1, profileStokes);
                 }
+                casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
+                region->fillProfileStats(i, profileData, subLattice);
             }
         }
     }

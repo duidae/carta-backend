@@ -5,9 +5,8 @@
 #include <vector>
 #include <utility>
 #include <string>
-#include <casacore/lattices/Lattices/SubLattice.h>
 
-#include <carta-protobuf/defs.pb.h>
+//#include <carta-protobuf/defs.pb.h>
 #include <carta-protobuf/region_requirements.pb.h>
 
 namespace carta {
@@ -27,11 +26,9 @@ public:
     bool setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles,
         const int nstokes, const int defaultStokes);
     size_t numSpectralProfiles();
-    int getSpectralConfigStokes(int profileIndex);
-    CARTA::SetSpectralRequirements_SpectralConfig getSpectralConfig(int profileIndex);
-    // set lattice once, then get stats for it
-    void setSpectralLattice(const casacore::SubLattice<float>& lattice);
-    void getStats(std::vector<float>& statistic, CARTA::StatsType type);
+    // return false if profileIndex out of range:
+    bool getSpectralConfigStokes(int& stokes, int profileIndex);
+    bool getSpectralConfig(CARTA::SetSpectralRequirements_SpectralConfig& config, int profileIndex);
 
 private:
     // parse spatial/coordinate strings into <axisIndex, stokesIndex> pairs
@@ -42,10 +39,8 @@ private:
     std::vector<std::pair<int, int>> m_profilePairs;
 
     // spectral
-    std::vector<CARTA::SetSpectralRequirements_SpectralConfig> m_spectralProfiles;
     std::vector<int> m_spectralStokes;
-    std::vector<float> m_zprofile;
-    casacore::SubLattice<float> m_spectralLattice;
+    std::vector<CARTA::SetSpectralRequirements_SpectralConfig> m_spectralConfigs;
 };
 
 }

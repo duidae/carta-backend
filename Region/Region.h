@@ -8,7 +8,7 @@
 
 #include "RegionStats.h"
 #include "RegionProfiler.h"
-#include <casacore/casa/Arrays/IPosition.h>
+#include <carta-protobuf/spectral_profile.pb.h>
 
 namespace carta {
 
@@ -43,11 +43,10 @@ public:
     bool setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles,
         const int nstokes, const int defaultStokes);
     size_t numSpectralProfiles();
-    CARTA::SetSpectralRequirements_SpectralConfig getSpectralConfig(int profileIndex);
-    int getSpectralConfigStokes(int profileIndex);
-    // set lattice once, then get stats for it
-    void setSpectralLattice(const casacore::SubLattice<float>& lattice);
-    void getProfileStats(std::vector<float>& statistic, CARTA::StatsType type);
+    bool getSpectralConfigStokes(int& stokes, int profileIndex);
+    bool getSpectralConfig(CARTA::SetSpectralRequirements_SpectralConfig& config, int profileIndex);
+    void fillProfileStats(int profileIndex, CARTA::SpectralProfileData& profileData, 
+        const casacore::SubLattice<float>& lattice);
 
 private:
 

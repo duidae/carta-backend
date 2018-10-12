@@ -1,6 +1,7 @@
 //# Region.cc: implementation of class for managing a region
 
 #include "Region.h"
+//#include <carta-protobuf/defs.pb.h>
 
 using namespace carta;
 
@@ -26,6 +27,8 @@ void Region::setRotation(const float rotation) {
 
 // ***********************************
 // RegionStats
+
+// histogram
 
 bool Region::setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs) {
     m_stats->setHistogramRequirements(histogramReqs);
@@ -76,28 +79,42 @@ std::string Region::getSpatialProfileStr(int profileIndex) {
 
 // spectral
 
-bool Region::setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles,
+bool Region::setSpectralRequirements(const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& configs,
         const int nstokes, const int defaultStokes) {
-    return m_profiler->setSpectralRequirements(profiles, nstokes, defaultStokes);
+    return m_profiler->setSpectralRequirements(configs, nstokes, defaultStokes);
 }
 
 size_t Region::numSpectralProfiles() {
     return m_profiler->numSpectralProfiles();
 }
 
-int Region::getSpectralConfigStokes(int profileIndex) {
-    return m_profiler->getSpectralConfigStokes(profileIndex);
+bool Region::getSpectralConfigStokes(int& stokes, int profileIndex) {
+    return m_profiler->getSpectralConfigStokes(stokes, profileIndex);
 }
 
-CARTA::SetSpectralRequirements_SpectralConfig Region::getSpectralConfig(int profileIndex) {
-    return m_profiler->getSpectralConfig(profileIndex);
-}
-
-void Region::setSpectralLattice(const casacore::SubLattice<float>& lattice) {
-    m_profiler->setSpectralLattice(lattice);
-}
-
-void Region::getProfileStats(std::vector<float>& statistic, CARTA::StatsType type) {
-    return m_profiler->getStats(statistic, type);
+void Region::fillProfileStats(int profileIndex, CARTA::SpectralProfileData& profileData,
+    const casacore::SubLattice<float>& lattice) {
+    // Fill SpectralProfileData with statistics values according to config stored in RegionProfiler;
+    // RegionStats does calculations
+    CARTA::SetSpectralRequirements_SpectralConfig config;
+    if (m_profiler->getSpectralConfig(config, profileIndex)) {
+        // get config coordinate and stats types
+        std::string coordinate(config.coordinate());
+        const std::vector<int> requestedStats(config.stats_types().begin(), config.stats_types().end());
+        size_t nstats = requestedStats.size();
+        // get values from RegionStats
+        std::vector<std::vector<float>> statsValues(nstats); // a float vector for each stats type
+        if (m_stats->getStatsValues(statsValues, requestedStats, lattice)) {
+            for (size_t i=0; i<nstats; ++i) {
+                // one SpectralProfile per stats type
+                auto newProfile = profileData.add_profiles();
+                newProfile->set_coordinate(coordinate);
+                auto statType = static_cast<CARTA::StatsType>(requestedStats[i]);
+                newProfile->set_stats_type(statType);
+                std::vector<float> svalues(statsValues[i]);
+                *newProfile->mutable_vals() = {svalues.begin(), svalues.end()};
+            }
+        }
+    }
 }
 
