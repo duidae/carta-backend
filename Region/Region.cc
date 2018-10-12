@@ -48,6 +48,15 @@ void Region::fillHistogram(CARTA::Histogram* histogram, const casacore::Matrix<f
     return m_stats->fillHistogram(histogram, chanMatrix, chanIndex, stokesIndex);
 }
 
+// stats
+void Region::setStatsRequirements(const std::vector<int>& statsTypes) {
+    m_stats->setStatsRequirements(statsTypes);
+}
+
+void Region::fillStatsData(CARTA::RegionStatsData& statsData, const casacore::SubLattice<float>& subLattice) {
+    m_stats->fillStatsData(statsData, subLattice);
+}
+
 // ***********************************
 // RegionProfiler
 
@@ -103,7 +112,7 @@ void Region::fillProfileStats(int profileIndex, CARTA::SpectralProfileData& prof
         const std::vector<int> requestedStats(config.stats_types().begin(), config.stats_types().end());
         size_t nstats = requestedStats.size();
         // get values from RegionStats
-        std::vector<std::vector<float>> statsValues(nstats); // a float vector for each stats type
+        std::vector<std::vector<float>> statsValues; // a float vector for each stats type
         if (m_stats->getStatsValues(statsValues, requestedStats, lattice)) {
             for (size_t i=0; i<nstats; ++i) {
                 // one SpectralProfile per stats type

@@ -3,7 +3,8 @@
 #pragma once
 
 #include <carta-protobuf/region_requirements.pb.h>  // HistogramConfig
-#include <carta-protobuf/defs.pb.h>  // Histogram
+#include <carta-protobuf/defs.pb.h>  // Histogram, StatisticsValue
+#include <carta-protobuf/region_stats.pb.h>  // RegionStatsData
 
 #include <casacore/casa/Arrays/Matrix.h>
 #include <casacore/casa/Arrays/IPosition.h>
@@ -25,7 +26,8 @@ public:
         const size_t chanIndex, const size_t stokesIndex);
 
     // Stats
-    void setStatsRequirements(const std::vector<CARTA::StatsType>& regionStats);
+    void setStatsRequirements(const std::vector<int>& statsTypes);
+    void fillStatsData(CARTA::RegionStatsData& statsData, const casacore::SubLattice<float>& subLattice);
     bool getStatsValues(std::vector<std::vector<float>>& statsValues,
         const std::vector<int>& requestedStats, const casacore::SubLattice<float>& lattice);
 
@@ -36,7 +38,7 @@ private:
     std::vector<CARTA::SetHistogramRequirements_HistogramConfig> m_configs;
 
     // Statistics
-    std::vector<CARTA::StatsType> m_regionStats; // stats requirements
+    std::vector<int> m_regionStats; // CARTA::StatsType requirements
 };
 
 }

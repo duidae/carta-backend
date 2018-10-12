@@ -89,6 +89,11 @@ tbb::task* OnMessageTask::execute() {
         if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
             session->onSetSpectralRequirements(message, requestId);
         }
+    } else if (eventName == "SET_STATS_REQUIREMENTS") {
+        CARTA::SetStatsRequirements message;
+        if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {
+            session->onSetStatsRequirements(message, requestId);
+        }
     } else {
         fmt::print("Unknown event type {}\n", eventName);
     }

@@ -6,7 +6,6 @@
 #include <utility>
 #include <string>
 
-//#include <carta-protobuf/defs.pb.h>
 #include <carta-protobuf/region_requirements.pb.h>
 
 namespace carta {

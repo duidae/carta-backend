@@ -531,6 +531,15 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
         chanMatrix.reference(channelCache);
         return;
     }
+    
+    // slice image data
+    casacore::Slicer section = getChannelMatrixSlicer(channel, stokes);
+    casacore::Array<float> tmp;
+    loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, section, true);
+    chanMatrix.reference(tmp);
+}
+
+casacore::Slicer Frame::getChannelMatrixSlicer(size_t channel, size_t stokes) {
     casacore::IPosition count(2, imageShape(0), imageShape(1));
     casacore::IPosition start(2, 0, 0);
 
@@ -547,9 +556,7 @@ void Frame::getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel
     }
     // slice image data
     casacore::Slicer section(start, count);
-    casacore::Array<float> tmp;
-    loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, section, true);
-    chanMatrix.reference(tmp);
+    return section;
 }
 
 void Frame::getProfileSlicer(casacore::Slicer& latticeSlicer, int x, int y, int channel, int stokes) {
@@ -804,6 +811,16 @@ bool Frame::setRegionSpectralRequirements(int regionId,
     }
 }
 
+bool Frame::setRegionStatsRequirements(int regionId, const std::vector<int> statsTypes) {
+    if (regions.count(regionId)) {
+        auto& region = regions[regionId];
+        region->setStatsRequirements(statsTypes);
+    } else {
+        // TODO: error handling
+        return false;
+    }
+}
+
 // ***** region data *****
 
 void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData) {
@@ -935,6 +952,20 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
                 region->fillProfileStats(i, profileData, subLattice);
             }
         }
+    }
+}
+
+void Frame::fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData) {
+    if (regions.count(regionId)) {
+        auto& region = regions[regionId];
+        int currChan(currentChannel()), currStokes(currentStokes());
+        statsData.set_channel(currChan);
+        statsData.set_stokes(currStokes);
+        casacore::Slicer lattSlicer;
+        //if ((regionId<=CURSOR_REGION_ID))
+        lattSlicer = getChannelMatrixSlicer(currChan, currStokes);  // for entire 2D image, for now
+        casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
+        region->fillStatsData(statsData, subLattice);
     }
 }
 

@@ -86,6 +86,7 @@ public:
     void onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId);
     void onSetHistogramRequirements(const CARTA::SetHistogramRequirements& message, uint32_t requestId);
     void onSetSpectralRequirements(const CARTA::SetSpectralRequirements& message, uint32_t requestId);
+    void onSetStatsRequirements(const CARTA::SetStatsRequirements& message, uint32_t requestId);
 
     void sendPendingMessages();
 
@@ -107,6 +108,7 @@ protected:
     // profile data
     void sendSpatialProfileData(int fileId, int regionId);
     void sendSpectralProfileData(int fileId, int regionId);
+    void sendRegionStatsData(int fileId, int regionId);
 
     // data compression
     void setCompression(CARTA::CompressionType type, float quality, int nsubsets);

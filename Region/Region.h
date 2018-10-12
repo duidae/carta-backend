@@ -48,6 +48,10 @@ public:
     void fillProfileStats(int profileIndex, CARTA::SpectralProfileData& profileData, 
         const casacore::SubLattice<float>& lattice);
 
+    // Region Stats
+    void setStatsRequirements(const std::vector<int>& statsTypes);
+    void fillStatsData(CARTA::RegionStatsData& statsData, const casacore::SubLattice<float>& subLattice);
+
 private:
 
     // region definition (ICD SET_REGION)

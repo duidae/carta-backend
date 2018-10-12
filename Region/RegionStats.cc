@@ -87,16 +87,37 @@ void RegionStats::fillHistogram(CARTA::Histogram* histogram, const casacore::Mat
 
 // ***** Statistics *****
 
-void RegionStats::setStatsRequirements(const std::vector<CARTA::StatsType>& regionStats) {
-    m_regionStats = regionStats;
+void RegionStats::setStatsRequirements(const std::vector<int>& statsTypes) {
+    m_regionStats = statsTypes;
+}
+
+void RegionStats::fillStatsData(CARTA::RegionStatsData& statsData, const casacore::SubLattice<float>& subLattice) {
+    // fill RegionStatsData with statistics types set in requirements
+
+    if (m_regionStats.empty()) {  // no requirements set
+        // add empty StatisticsValue
+        auto statsValue = statsData.add_statistics();  // pointer
+        statsValue->set_stats_type(CARTA::StatsType::None);
+        return;
+    }
+
+    std::vector<std::vector<float>> results;
+    if (getStatsValues(results, m_regionStats, subLattice)) {
+        for (size_t i=0; i<m_regionStats.size(); ++i) {
+            auto statType = static_cast<CARTA::StatsType>(m_regionStats[i]);
+            std::vector<float> values(results[i]);
+            // add StatisticsValue
+            auto statsValue = statsData.add_statistics();
+            statsValue->set_stats_type(statType);
+            statsValue->set_value(values[0]); // only one value allowed
+        }
+    }
 }
 
 bool RegionStats::getStatsValues(std::vector<std::vector<float>>& statsValues,
     const std::vector<int>& requestedStats, const casacore::SubLattice<float>& subLattice) {
-    // fill statsValues vector for requested stats; one vector<float> per stat
-    if (statsValues.size() != requestedStats.size())
-        return false;
-        
+    // Fill statsValues vector for requested stats; one vector<float> per stat
+
     // use LatticeStatistics to fill statistics values according to type
     casacore::LatticeStatistics<float> latticeStats = casacore::LatticeStatistics<float>(subLattice,
             /*showProgress*/ false, /*forceDisk*/ false, /*clone*/ false);
