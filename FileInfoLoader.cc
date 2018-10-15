@@ -505,7 +505,8 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         casacore::Vector<casacore::Double> axRefVal(imSummary.referenceValues());
         casacore::Vector<casacore::Double> axInc(imSummary.axisIncrements());
         casacore::Vector<casacore::String> axUnits(imSummary.axisUnits());
-        for (casacore::uInt i=0; i<axNames.size(); ++i) {
+	size_t axisSize(axNames.size());
+        for (casacore::uInt i=0; i<axisSize; ++i) {
             casacore::String suffix(casacore::String::toString(i+1));
             // name = CTYPE
             headerEntry = extendedInfo->add_header_entries();
@@ -546,18 +547,19 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
             headerEntry->set_entry_type(EntryType::STRING);
         }
         // cr coords
-        std::string crpix1(std::to_string(static_cast<int>(axRefPix(0)))),
-            crpix2(std::to_string(static_cast<int>(axRefPix(1)))),
-            cunit1(axUnits(0)), cunit2(axUnits(1));
-        double crval1(axRefVal(0)), crval2(axRefVal(1)), cdelt1(axInc(0)), cdelt2(axInc(1));
         std::string crPixels, crCoords, crDegStr, axisInc;
-        if (!crpix1.empty() && !crpix2.empty())
-            crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
-        if (crval1!=0.0 && crval2!=0.0) 
-            crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
-        crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
-        if (!(cdelt1==0.0 && cdelt2==0.0)) 
-            axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
+	if (axisSize > 1) {
+	    std::string crpix0(std::to_string(static_cast<int>(axRefPix(0)))),
+	                crpix1(std::to_string(static_cast<int>(axRefPix(1)))),
+                        cunit0(axUnits(0)),
+                        cunit1(axUnits(1));
+	    double crval0(axRefVal(0)), cdelt0(axInc(0)),
+	           crval1(axRefVal(1)), cdelt1(axInc(1));
+            crPixels = fmt::format("[{}, {}]", crpix0, crpix1);
+            crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval0, cunit0, crval1, cunit1);
+            crDegStr = makeDegStr(coordinateTypeX, crval0, crval1, cunit0, cunit1);
+            axisInc = fmt::format("{} {}, {} {}", cdelt0, cunit0, cdelt1, cunit1);
+        }
 
         // depth, stokes
         bool stokesIsAxis4(true);
