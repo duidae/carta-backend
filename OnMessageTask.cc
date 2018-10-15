@@ -21,19 +21,23 @@ std::string getEventName(char* rawMessage) {
     return std::string(rawMessage, std::min(std::strlen(rawMessage), max_len));
 }
 
-OnMessageTask::OnMessageTask(Session *session_, std::string eventName_,
-                             std::vector<char> eventPayload_, uint32_t requestId_,
+OnMessageTask::OnMessageTask(Session *session_,
+                             tbb::concurrent_queue<std::tuple<std::string,uint32_t,std::vector<char>>> *mqueue_,
                              carta::AnimationQueue *aqueue_)
     : session(session_),
-      eventName(eventName_),
-      requestId(requestId_),
-      eventPayload(eventPayload_),
+      mqueue(mqueue_),
       aqueue(aqueue_)
 {}
 
 tbb::task* OnMessageTask::execute() {
     //CARTA ICD
     auto tStart = std::chrono::high_resolution_clock::now();
+    std::tuple<std::string,uint32_t,std::vector<char>> msg;
+    mqueue->try_pop(msg);
+    std::string eventName;
+    uint32_t requestId;
+    std::vector<char> eventPayload;
+    std::tie(eventName, requestId, eventPayload) = msg;
     if (eventName == "REGISTER_VIEWER") {
         CARTA::RegisterViewer message;
         if (message.ParseFromArray(eventPayload.data(), eventPayload.size())) {

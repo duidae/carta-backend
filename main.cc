@@ -8,6 +8,8 @@
 #include <regex>
 #include <fstream>
 #include <iostream>
+#include <tuple>
+#include <tbb/concurrent_queue.h>
 #include <tbb/task_scheduler_init.h>
 #include "AnimationQueue.h"
 #include "Session.h"
@@ -22,6 +24,7 @@ namespace po = boost::program_options;
 unordered_map<WebSocket<SERVER>*, Session*> sessions;
 unordered_map<WebSocket<SERVER>*, carta::AnimationQueue*> animationQueues;
 unordered_map<string, vector<string>> permissionsMap;
+unordered_map<WebSocket<SERVER>*, tbb::concurrent_queue<tuple<string,uint32_t,vector<char>>>*> msgQueues;
 boost::uuids::random_generator uuid_gen;
 Hub h;
 
@@ -66,6 +69,7 @@ void onConnect(WebSocket<SERVER>* ws, HttpRequest httpRequest) {
         });
     sessions[ws] = new Session(ws, uuid_gen(), permissionsMap, usePermissions, baseFolder, outgoing, verbose);
     animationQueues[ws] = new carta::AnimationQueue(sessions[ws]);
+    msgQueues[ws] = new tbb::concurrent_queue<tuple<string,uint32_t,vector<char>>>;
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
@@ -82,6 +86,8 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
         sessions.erase(ws);
         delete animationQueues[ws];
         animationQueues.erase(ws);
+        delete msgQueues[ws];
+        msgQueues.erase(ws);
     }
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
@@ -104,8 +110,9 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
             std::string eventName(rawMessage, std::min(std::strlen(rawMessage), max_len));
             uint32_t requestId = *reinterpret_cast<uint32_t*>(rawMessage+32);
             std::vector<char> eventPayload(&rawMessage[36], &rawMessage[length]);
+            msgQueues[ws]->push(std::make_tuple(eventName, requestId, eventPayload));
             OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(
-                session, eventName, eventPayload, requestId, animationQueues[ws]);
+                session, msgQueues[ws], animationQueues[ws]);
             if(eventName == "SET_IMAGE_CHANNELS") {
                 CARTA::SetImageChannels message;
                 message.ParseFromArray(eventPayload.data(), eventPayload.size());
