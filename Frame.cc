@@ -867,8 +867,8 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
-        CARTA::Point ctrlPt = region->getControlPoint();
-        int x(ctrlPt.x()), y(ctrlPt.y());
+	std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
+        int x(ctrlPts[0].x()), y(ctrlPts[0].y());
         profileData.set_x(x);
         profileData.set_y(y);
         int chan(currentChannel());
@@ -931,8 +931,8 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
         profileData.set_progress(1.0); // for now (cursor), send all at once
         // Set channel vals
         // get slicer
-        CARTA::Point ctrlPt = region->getControlPoint();
-        int x(ctrlPt.x()), y(ctrlPt.y());
+	std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
+        int x(ctrlPts[0].x()), y(ctrlPts[0].y());
         casacore::Slicer lattSlicer;
         getProfileSlicer(lattSlicer, x, y, -1, currStokes);
         // get zprofile

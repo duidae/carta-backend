@@ -18,11 +18,15 @@ void Region::setChannels(int minchan, int maxchan, std::vector<int>& stokes) {
 }
 
 void Region::setControlPoints(const std::vector<CARTA::Point>& points) {
-    m_ctrl_pts = points;
+    m_ctrlpoints = points;
 }
 
 void Region::setRotation(const float rotation) {
     m_rotation = rotation;
+}
+
+std::vector<CARTA::Point> Region::getControlPoints() {
+    return m_ctrlpoints;
 }
 
 // ***********************************
@@ -65,13 +69,6 @@ void Region::fillStatsData(CARTA::RegionStatsData& statsData, const casacore::Su
 bool Region::setSpatialRequirements(const std::vector<std::string>& profiles,
         const int nstokes, const int defaultStokes) {
     return m_profiler->setSpatialRequirements(profiles, nstokes, defaultStokes);
-}
-
-CARTA::Point Region::getControlPoint(int pointIndex) {
-    CARTA::Point point;
-    if (pointIndex < m_ctrl_pts.size())
-        point = m_ctrl_pts[pointIndex];
-    return point;
 }
 
 size_t Region::numSpatialProfiles() {

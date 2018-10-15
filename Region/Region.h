@@ -23,7 +23,7 @@ public:
     void setControlPoints(const std::vector<CARTA::Point>& points);
     void setRotation(const float rotation);
     // get Region parameters
-    CARTA::Point getControlPoint(int pointIndex=0);
+    std::vector<CARTA::Point> getControlPoints();
 
     // Histogram: pass through to RegionStats
     bool setHistogramRequirements(const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histogramReqs);
@@ -59,7 +59,7 @@ private:
     CARTA::RegionType m_type;
     int m_minchan, m_maxchan;
     std::vector<int> m_stokes;
-    std::vector<CARTA::Point> m_ctrl_pts;
+    std::vector<CARTA::Point> m_ctrlpoints;
     float m_rotation;
 
     std::unique_ptr<carta::RegionStats> m_stats;
