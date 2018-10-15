@@ -519,7 +519,6 @@ bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
             std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
             setRegionSpectralRequirements(CURSOR_REGION_ID, spectralProfiles);
         }
-
     }
 
     return true;
