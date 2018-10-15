@@ -22,7 +22,6 @@ namespace po = boost::program_options;
 unordered_map<WebSocket<SERVER>*, Session*> sessions;
 unordered_map<WebSocket<SERVER>*, carta::AnimationQueue*> animationQueues;
 unordered_map<string, vector<string>> permissionsMap;
-tbb::concurrent_queue<std::tuple<std::string,uint32_t,std::vector<char>>> msgQueue;
 boost::uuids::random_generator uuid_gen;
 Hub h;
 
@@ -105,9 +104,8 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
             std::string eventName(rawMessage, std::min(std::strlen(rawMessage), max_len));
             uint32_t requestId = *reinterpret_cast<uint32_t*>(rawMessage+32);
             std::vector<char> eventPayload(&rawMessage[36], &rawMessage[length]);
-            msgQueue.push(std::make_tuple(eventName, requestId, eventPayload));
             OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(
-                session, msgQueue, animationQueues[ws]);
+                session, eventName, eventPayload, requestId, animationQueues[ws]);
             if(eventName == "SET_IMAGE_CHANNELS") {
                 CARTA::SetImageChannels message;
                 message.ParseFromArray(eventPayload.data(), eventPayload.size());
