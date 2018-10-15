@@ -85,6 +85,8 @@ public:
     void onSetCursor(const CARTA::SetCursor& message, uint32_t requestId);
     void onSetSpatialRequirements(const CARTA::SetSpatialRequirements& message, uint32_t requestId);
     void onSetHistogramRequirements(const CARTA::SetHistogramRequirements& message, uint32_t requestId);
+    void onSetSpectralRequirements(const CARTA::SetSpectralRequirements& message, uint32_t requestId);
+    void onSetStatsRequirements(const CARTA::SetStatsRequirements& message, uint32_t requestId);
 
     void sendPendingMessages();
 
@@ -103,8 +105,10 @@ protected:
     // raster image data, optionally with histogram
     void sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram = nullptr);
     CARTA::RegionHistogramData* getRegionHistogramData(const int32_t fileId, const int32_t regionId=-1);
-    // spatial profile data
+    // profile data
     void sendSpatialProfileData(int fileId, int regionId);
+    void sendSpectralProfileData(int fileId, int regionId);
+    void sendRegionStatsData(int fileId, int regionId);
 
     // data compression
     void setCompression(CARTA::CompressionType type, float quality, int nsubsets);

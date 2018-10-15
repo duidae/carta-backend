@@ -8,6 +8,7 @@
 
 #include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/spatial_profile.pb.h>
+#include <carta-protobuf/spectral_profile.pb.h>
 #include "ImageData/FileLoader.h"
 #include "Region/Region.h"
 
@@ -57,6 +58,7 @@ private:
     bool loadImageChannelStats(bool loadPercentiles = false);
     void setImageRegion(); // set region for entire image
     // fill given matrix for given channel and stokes
+    casacore::Slicer getChannelMatrixSlicer(size_t channel, size_t stokes);
     void getChannelMatrix(casacore::Matrix<float>& chanMatrix, size_t channel, size_t stokes);
     // get image data slicer for axis profile: whichever axis is set to -1
     void getProfileSlicer(casacore::Slicer& latticeSlicer, int x, int y, int channel, int stokes);
@@ -86,7 +88,6 @@ public:
     bool setRegionChannels(int regionId, int minchan, int maxchan, std::vector<int>& stokes);
     bool setRegionControlPoints(int regionId, std::vector<CARTA::Point>& points);
     bool setRegionRotation(int regionId, float rotation);
-
     // setRegion for cursor (defaults for fields not in SET_CURSOR)
     void setCursorRegion(int regionId, const CARTA::Point& point);
 
@@ -94,8 +95,13 @@ public:
     bool setRegionHistogramRequirements(int regionId,
         const std::vector<CARTA::SetHistogramRequirements_HistogramConfig>& histograms);
     bool setRegionSpatialRequirements(int regionId, const std::vector<std::string>& profiles);
+    bool setRegionSpectralRequirements(int regionId,
+        const std::vector<CARTA::SetSpectralRequirements_SpectralConfig>& profiles);
+    bool setRegionStatsRequirements(int regionId, const std::vector<int> statsTypes);
 
     // get region histograms, profiles
     void fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData);
     void fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
+    void fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData);
+    void fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData);
 };
