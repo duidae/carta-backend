@@ -97,6 +97,7 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
     log(boost::uuids::to_string(uuids[ws]), "Client {} [{}] Disconnected ({}). Remaining clients: {}", boost::uuids::to_string(uuid), ws->getAddress().address, timeString, sessions.size());
+    uuids.erase(ws);
 }
 
 // Forward message requests to session callbacks after parsing message into relevant ProtoBuf message
