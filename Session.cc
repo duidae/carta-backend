@@ -1,6 +1,7 @@
 #include "Session.h"
 #include "FileInfoLoader.h"
 #include "compression.h"
+#include "util.h"
 
 #include <carta-protobuf/raster_image.pb.h>
 #include <carta-protobuf/region_histogram.pb.h>
@@ -134,7 +135,7 @@ FileListResponse Session::getFileList(string folder) {
             return fileList;
         }
     } catch (casacore::AipsError& err) {
-        fmt::print("Error: {}\n", err.getMesg().c_str());
+        log(boost::uuids::to_string(uuid), "Error: {}", err.getMesg().c_str());
         sendLogEvent(err.getMesg(), {"file-list"}, CARTA::ErrorSeverity::ERROR);
         fileList.set_success(false);
         fileList.set_message(err.getMesg());
@@ -462,12 +463,12 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                 }
 
                 if (verboseLogging) {
-                    string compressionInfo = fmt::format("Image data of size {:.1f} kB compressed to {:.1f} kB in {} ms at {:.2f} MPix/s\n",
+                    string compressionInfo = fmt::format("Image data of size {:.1f} kB compressed to {:.1f} kB in {} ms at {:.2f} MPix/s",
                                numRows * rowLength * sizeof(float) / 1e3,
                                accumulate(compressedSizes.begin(), compressedSizes.end(), 0) * 1e-3,
                                1e-3 * dtCompress,
                                (float) (numRows * rowLength) / dtCompress);
-                    fmt::print(compressionInfo);
+                    log(boost::uuids::to_string(uuid), compressionInfo);
                     sendLogEvent(compressionInfo, {"zfp"}, CARTA::ErrorSeverity::DEBUG);
                 }
             } else {

@@ -1,4 +1,5 @@
 #include "OnMessageTask.h"
+#include "util.h"
 #include <algorithm>
 #include <carta-protobuf/close_file.pb.h>
 #include <carta-protobuf/file_info.pb.h>
@@ -21,10 +22,11 @@ std::string getEventName(char* rawMessage) {
     return std::string(rawMessage, std::min(std::strlen(rawMessage), max_len));
 }
 
-OnMessageTask::OnMessageTask(Session *session_,
+OnMessageTask::OnMessageTask(std::string uuid_, Session *session_,
                              tbb::concurrent_queue<std::tuple<std::string,uint32_t,std::vector<char>>> *mqueue_,
                              carta::AnimationQueue *aqueue_)
-    : session(session_),
+    : uuid(uuid_),
+      session(session_),
       mqueue(mqueue_),
       aqueue(aqueue_)
 {}
@@ -99,10 +101,10 @@ tbb::task* OnMessageTask::execute() {
             session->onSetStatsRequirements(message, requestId);
         }
     } else {
-        fmt::print("Unknown event type {}\n", eventName);
+        log(uuid, "Unknown event type {}", eventName);
     }
     auto tEnd = std::chrono::high_resolution_clock::now();
     auto dt = std::chrono::duration_cast<std::chrono::microseconds>(tEnd - tStart).count();
-    fmt::print("Operation {} took {}ms\n", eventName, dt/1e3);
+    log(uuid, "Operation {} took {}ms", eventName, dt/1e3);
     return nullptr;
 }

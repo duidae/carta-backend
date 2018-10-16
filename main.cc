@@ -14,6 +14,7 @@
 #include "AnimationQueue.h"
 #include "Session.h"
 #include "OnMessageTask.h"
+#include "util.h"
 
 #define MAX_THREADS 4
 
@@ -25,6 +26,7 @@ unordered_map<WebSocket<SERVER>*, Session*> sessions;
 unordered_map<WebSocket<SERVER>*, carta::AnimationQueue*> animationQueues;
 unordered_map<string, vector<string>> permissionsMap;
 unordered_map<WebSocket<SERVER>*, tbb::concurrent_queue<tuple<string,uint32_t,vector<char>>>*> msgQueues;
+unordered_map<WebSocket<SERVER>*, boost::uuids::uuid> uuids;
 boost::uuids::random_generator uuid_gen;
 Hub h;
 
@@ -67,14 +69,16 @@ void onConnect(WebSocket<SERVER>* ws, HttpRequest httpRequest) {
                 s.second->sendPendingMessages();
             }
         });
-    sessions[ws] = new Session(ws, uuid_gen(), permissionsMap, usePermissions, baseFolder, outgoing, verbose);
+    boost::uuids::uuid uuid = uuid_gen();
+    sessions[ws] = new Session(ws, uuid, permissionsMap, usePermissions, baseFolder, outgoing, verbose);
     animationQueues[ws] = new carta::AnimationQueue(sessions[ws]);
     msgQueues[ws] = new tbb::concurrent_queue<tuple<string,uint32_t,vector<char>>>;
+    uuids[ws] = uuid;
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
 
-    fmt::print("Client {} [{}] Connected ({}). Clients: {}\n", boost::uuids::to_string(sessions[ws]->uuid), ws->getAddress().address, timeString, sessions.size());
+    log(boost::uuids::to_string(uuids[ws]), "Client {} [{}] Connected ({}). Clients: {}", boost::uuids::to_string(sessions[ws]->uuid), ws->getAddress().address, timeString, sessions.size());
 }
 
 // Called on disconnect. Cleans up sessions. In future, we may want to delay this (in case of unintentional disconnects)
@@ -92,7 +96,7 @@ void onDisconnect(WebSocket<SERVER>* ws, int code, char* message, size_t length)
     time_t time = chrono::system_clock::to_time_t(chrono::system_clock::now());
     string timeString = ctime(&time);
     timeString = timeString.substr(0, timeString.length() - 1);
-    fmt::print("Client {} [{}] Disconnected ({}). Remaining clients: {}\n", boost::uuids::to_string(uuid), ws->getAddress().address, timeString, sessions.size());
+    log(boost::uuids::to_string(uuids[ws]), "Client {} [{}] Disconnected ({}). Remaining clients: {}", boost::uuids::to_string(uuid), ws->getAddress().address, timeString, sessions.size());
 }
 
 // Forward message requests to session callbacks after parsing message into relevant ProtoBuf message
@@ -112,7 +116,7 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
             std::vector<char> eventPayload(&rawMessage[36], &rawMessage[length]);
             msgQueues[ws]->push(std::make_tuple(eventName, requestId, eventPayload));
             OnMessageTask *omt = new(tbb::task::allocate_root()) OnMessageTask(
-                session, msgQueues[ws], animationQueues[ws]);
+                boost::uuids::to_string(uuids[ws]), session, msgQueues[ws], animationQueues[ws]);
             if(eventName == "SET_IMAGE_CHANNELS") {
                 CARTA::SetImageChannels message;
                 message.ParseFromArray(eventPayload.data(), eventPayload.size());
@@ -121,7 +125,7 @@ void onMessage(WebSocket<SERVER>* ws, char* rawMessage, size_t length, OpCode op
             tbb::task::enqueue(*omt);
         }
     } else {
-        fmt::print("Invalid event type\n");
+        log(boost::uuids::to_string(uuids[ws]), "Invalid event type");
     }
 };
 
