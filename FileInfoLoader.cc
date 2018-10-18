@@ -4,13 +4,13 @@
 
 #include <algorithm>
 #include <fmt/format.h>
-#include <H5Cpp.h>
-#include <H5File.h>
 
 #include <casacore/casa/OS/File.h>
 #include <casacore/fits/FITS/FITSTable.h>
 #include <casacore/casa/HDF5/HDF5File.h>
 #include <casacore/casa/HDF5/HDF5Group.h>
+#include <casacore/casa/HDF5/HDF5Error.h>
+#include <casacore/casa/HDF5/HDF5DataSet.h>
 #include <casacore/images/Images/ImageSummary.h>
 #include <casacore/images/Images/FITSImgParser.h>
 #include <casacore/images/Images/MIRIADImage.h>
@@ -18,7 +18,75 @@
 
 using namespace std;
 using namespace CARTA;
-using namespace H5;
+
+
+//#################################################################################
+// HDF5Attributes class
+
+casacore::Record HDF5Attributes::doReadAttributes (hid_t groupHid) {
+    // reads attributes but not links
+    casacore::Record rec;
+    char cname[512];
+    int nfields = H5Aget_num_attrs (groupHid);
+    // Iterate through the attributes in order of index, so we're sure
+    // they are read back in the same order as written.
+    for (int index=0; index<nfields; ++index) {
+        casacore::HDF5HidAttribute id(H5Aopen_idx(groupHid, index));
+        AlwaysAssert (id.getHid()>=0, casacore::AipsError);
+        unsigned int namsz = H5Aget_name(id, sizeof(cname), cname);
+        AlwaysAssert (namsz<sizeof(cname), casacore::AipsError);
+        casacore::String name(cname);
+        // Get rank and shape from the dataspace info.
+        casacore::HDF5HidDataSpace dsid (H5Aget_space(id));
+        int rank = H5Sget_simple_extent_ndims(dsid);
+        if (rank > 0) {
+          casacore::Block<hsize_t> shp(rank);
+          rank = H5Sget_simple_extent_dims(dsid, shp.storage(), NULL);
+        }
+        // Get data type and its size.
+        if (rank == 0) {
+          casacore::HDF5HidDataType dtid(H5Aget_type(id));
+          readScalar (id, dtid, name, rec);
+        }
+    }
+    return rec;
+}
+
+void HDF5Attributes::readScalar (hid_t attrId, hid_t dtid, const casacore::String& name,
+    casacore::RecordInterface& rec) {
+    // Handle a scalar field.
+    int sz = H5Tget_size(dtid);
+    switch (H5Tget_class(dtid)) {
+        case H5T_INTEGER: {
+            casacore::Int64 value;
+            casacore::HDF5DataType dtype((casacore::Int64*)0);
+            H5Aread(attrId, dtype.getHidMem(), &value);
+            rec.define(name, value);
+            }
+            break;
+        case H5T_FLOAT: {
+            casacore::Double value;
+            casacore::HDF5DataType dtype((casacore::Double*)0);
+            H5Aread(attrId, dtype.getHidMem(), &value);
+            rec.define(name, value);
+            }
+            break;
+        case H5T_STRING: {
+            casacore::String value;
+            value.resize(sz+1);
+            casacore::HDF5DataType dtype(value);
+            H5Aread(attrId, dtype.getHidMem(), const_cast<char*>(value.c_str()));
+            value.resize(sz);
+            rec.define(name, value);
+            }
+            break;
+        default: 
+           throw casacore::HDF5Error ("Unknown data type of scalar attribute " + name);
+    }
+}
+
+//#################################################################################
+// FILE INFO LOADER
 
 FileInfoLoader::FileInfoLoader(const string& filename) :
     m_file(filename) {
@@ -65,8 +133,9 @@ bool FileInfoLoader::getHduList(FileInfo* fileInfo, const std::string& filename)
     if (fileInfo->type()==CARTA::HDF5) {
         casacore::HDF5File hdfFile(filename);
         std::vector<casacore::String> hdus(casacore::HDF5Group::linkNames(hdfFile));
-        for (auto groupName : hdus)
+        for (auto groupName : hdus) {
             fileInfo->add_hdu_list(groupName);
+        }
         hduOK = (fileInfo->hdu_list_size() > 0);
     } else if (fileInfo->type()==CARTA::FITS) {
         casacore::FITSImgParser fitsParser(filename.c_str());
@@ -84,13 +153,51 @@ bool FileInfoLoader::getHduList(FileInfo* fileInfo, const std::string& filename)
 //#################################################################################
 // FILE INFO EXTENDED
 
+// get int value
+bool FileInfoLoader::getIntAttribute(casacore::Int64& val, const casacore::Record& rec, const casacore::String& field) {
+    bool getOK(true);
+    if (rec.isDefined(field)) {
+        try {
+            val = rec.asInt64(field);
+        } catch (casacore::AipsError& err) {
+            try {
+                val = casacore::String::toInt(rec.asString(field));
+            } catch (casacore::AipsError& err) {
+                getOK = false;
+            }
+        }
+    } else {
+        getOK = false;
+    }
+    return getOK;
+}
+
+// get double value
+bool FileInfoLoader::getDoubleAttribute(casacore::Double& val, const casacore::Record& rec, const casacore::String& field) {
+    bool getOK(true);
+    if (rec.isDefined(field)) {
+        try {
+            val = rec.asDouble(field);
+        } catch (casacore::AipsError& err) {
+            try {
+                val = casacore::String::toDouble(rec.asString(field));
+            } catch (casacore::AipsError& err) {
+                getOK = false;
+            }
+        }
+    } else {
+        getOK = false;
+    }
+    return getOK;
+}
+
 // make strings for computed entries
 void FileInfoLoader::makeRadesysStr(std::string& radeSys, const std::string& equinox) {
     // append equinox to radesys
     if (!radeSys.empty() && !equinox.empty()) {
         string prefix;
-        if (radeSys=="FK4") prefix="B";
-        else if (radeSys=="FK5") prefix="J";
+        if (radeSys == ("FK4")) prefix="B";
+        else if (radeSys == ("FK5")) prefix="J";
         radeSys.append(", " + prefix + equinox);
     }
 }
@@ -140,141 +247,169 @@ bool FileInfoLoader::fillFileExtInfo(FileInfoExtended* extInfo, string& hdu, str
 
 bool FileInfoLoader::fillHdf5ExtFileInfo(FileInfoExtended* extendedInfo, string& hdu, string& message) {
     // Add extended info for HDF5 file
-    bool extInfoOK(true);
-    H5File file(m_file, H5F_ACC_RDONLY);
-    bool hasHDU;
-    if (hdu.length()) {
-        hasHDU = H5Lexists(file.getId(), hdu.c_str(), 0);
-    } else {
-        auto N = file.getNumObjs();
-        hasHDU = false;
-        for (auto i = 0; i < N; i++) {
-            if (file.getObjTypeByIdx(i) == H5G_GROUP) {
-                hdu = file.getObjnameByIdx(i);
-                hasHDU = true;
-                break;
-            }
+    try {
+        casacore::HDF5File hdfFile(m_file);
+        casacore::HDF5Group hdfGroup(hdfFile, hdu, true);
+        casacore::Record attributes;
+        try {
+            attributes = HDF5Attributes::doReadAttributes(hdfGroup.getHid());
+        } catch (casacore::HDF5Error& err) {
+            message = "Error reading attributes: " + err.getMesg();
+            hdfGroup.close();
+            hdfFile.close();
+            return false;
         }
-    }
+        hdfGroup.close();
+        hdfFile.close();
+        if (attributes.empty())
+            return false;
 
-    if (hasHDU) {
-        H5::Group topLevelGroup = file.openGroup(hdu);
-        if (H5Lexists(topLevelGroup.getId(), "DATA", 0)) {
-            DataSet dataSet = topLevelGroup.openDataSet("DATA");
-            vector<hsize_t> dims(dataSet.getSpace().getSimpleExtentNdims(), 0);
-            dataSet.getSpace().getSimpleExtentDims(dims.data(), NULL);
-            uint32_t ndims = dims.size();
-            extendedInfo->set_dimensions(ndims);
-            if (ndims < 2 || ndims > 4) {
-                message = "Image must be 2D, 3D or 4D.";
+        // check dimensions
+        casacore::Int64 ndims(0);
+        casacore::IPosition dataShape;
+        if (attributes.isDefined("NAXIS")) {
+            bool ok = getIntAttribute(ndims, attributes, "NAXIS");
+        } else {
+            try {
+                casacore::HDF5DataSet dataSet(hdfGroup, "DATA", (casacore::Float*)0);
+                dataShape = dataSet.shape();
+                ndims = dataShape.size();
+            } catch (casacore::AipsError& err) {
+                message = "HDF5 file is missing DATA dataset";
                 return false;
             }
-            extendedInfo->set_width(dims[ndims - 1]);
-            extendedInfo->set_height(dims[ndims - 2]);
-
-            // if in header, save values for computed entries
-            std::string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys, equinox, specSys, bunit,
-                crpix1, crpix2, cunit1, cunit2;
-            double crval1(0.0), crval2(0.0), cdelt1(0.0), cdelt2(0.0);
-
-            // header_entries
-            H5O_info_t groupInfo;
-            H5Oget_info(topLevelGroup.getId(), &groupInfo);
-            for (auto i = 0; i < groupInfo.num_attrs; i++) {
-                auto headerEntry = extendedInfo->add_header_entries();
-                Attribute attr = topLevelGroup.openAttribute(i);
-                headerEntry->set_name(attr.getName());
-
-                hid_t attrTypeId = H5Aget_type(attr.getId());
-                auto typeClass = H5Tget_class(attrTypeId);
-                if (typeClass == H5T_STRING) {
-                    attr.read(attr.getStrType(), *headerEntry->mutable_value());
-                    headerEntry->set_entry_type(EntryType::STRING);
-                    if (headerEntry->name() == "CTYPE1") 
-                        coordinateTypeX = headerEntry->value();
-                    else if (headerEntry->name() == "CTYPE2")
-                        coordinateTypeY = headerEntry->value();
-                    else if (headerEntry->name() == "CTYPE4")
-                        coordinateType4 = headerEntry->value();
-                    else if (headerEntry->name() == "RADESYS") 
-                        radeSys = headerEntry->value();
-                    else if (headerEntry->name() == "SPECSYS") 
-                        specSys = headerEntry->value();
-                    else if (headerEntry->name() == "BUNIT") 
-                        bunit = headerEntry->value();
-                    else if (headerEntry->name() == "CUNIT1") 
-                        cunit1 = headerEntry->value();
-                    else if (headerEntry->name() == "CUNIT2") 
-                        cunit2 = headerEntry->value();
-                } else if (typeClass == H5T_INTEGER) {
-                    int64_t valueInt;
-                    DataType intType(PredType::NATIVE_INT64);
-                    attr.read(intType, &valueInt);
-                    *headerEntry->mutable_value() = fmt::format("{}", valueInt);
-                    headerEntry->set_numeric_value(valueInt);
-                    headerEntry->set_entry_type(EntryType::INT);
-                } else if (typeClass == H5T_FLOAT) {
-                    DataType doubleType(PredType::NATIVE_DOUBLE);
-                    double numericValue = 0;
-                    attr.read(doubleType, &numericValue);
-                    headerEntry->set_numeric_value(numericValue);
-                    headerEntry->set_entry_type(EntryType::FLOAT);
-                    *headerEntry->mutable_value() = fmt::format("{:f}", numericValue);
-                    if (headerEntry->name() == "EQUINOX")
-                        equinox = std::to_string(static_cast<int>(numericValue));
-                    else if (headerEntry->name() == "CRVAL1")
-                        crval1 = numericValue;
-                    else if (headerEntry->name() == "CRVAL2")
-                        crval2 = numericValue;
-                    else if (headerEntry->name() == "CRPIX1")
-                        crpix1 = std::to_string(static_cast<int>(numericValue)); 
-                    else if (headerEntry->name() == "CRPIX2")
-                        crpix2 = std::to_string(static_cast<int>(numericValue)); 
-                    else if (headerEntry->name() == "CDELT1")
-                        cdelt1 = numericValue; 
-                    else if (headerEntry->name() == "CDELT2")
-                        cdelt2 = numericValue; 
-                }
-            }
-            // depth, stokes
-            bool stokesIsAxis4(true);
-            if (ndims<4) {
-                extendedInfo->set_depth((ndims > 2) ? dims[ndims - 3] : 1);
-                extendedInfo->set_stokes(1);
-            } else {
-                transform(coordinateType4.begin(), coordinateType4.end(), coordinateType4.begin(), ::toupper);
-                if (coordinateType4=="STOKES") {
-                    extendedInfo->set_depth(dims[ndims - 3]);
-                    extendedInfo->set_stokes(dims[ndims - 4]);
-                } else {
-                    extendedInfo->set_depth(dims[ndims - 4]);
-                    extendedInfo->set_stokes(dims[ndims - 3]);
-                    stokesIsAxis4 = false;
-                }
-            }
-            // make computed entries strings
-            std::string crPixels, crCoords, crDegStr, axisInc;
-            if (!crpix1.empty() && !crpix2.empty())
-                crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
-            if (!(crval1 == 0.0 && crval2 == 0.0)) 
-                crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
-            crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
-            if (!(cdelt1 == 0.0 && cdelt2 == 0.0)) 
-                axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
-            makeRadesysStr(radeSys, equinox);
-
-            // fill computed_entries
-            addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, crPixels, crCoords, crDegStr,
-                radeSys, specSys, bunit, axisInc, stokesIsAxis4);
-        } else {
-            message = "File is missing DATA dataset";
-            extInfoOK = false;
         }
-    } else {
-        message = "File is missing top-level group";
-        extInfoOK = false;
+        if (ndims < 2 || ndims > 4) {
+            message = "Image must be 2D, 3D or 4D.";
+            return false;
+        }
+        extendedInfo->set_dimensions(ndims);
+
+        // extract values from Record
+        for (casacore::uInt field=0; field<attributes.nfields(); ++field) {
+            auto headerEntry = extendedInfo->add_header_entries();
+            headerEntry->set_name(attributes.name(field));
+            switch (attributes.type(field)) {
+                case casacore::TpString: {
+                    *headerEntry->mutable_value() = attributes.asString(field);
+                    headerEntry->set_entry_type(EntryType::STRING);
+                    }
+                    break;
+                case casacore::TpInt64: {
+                    casacore::Int64 valueInt = attributes.asInt64(field);
+                    *headerEntry->mutable_value() = fmt::format("{}", valueInt);
+                    headerEntry->set_entry_type(EntryType::INT);
+                    headerEntry->set_numeric_value(valueInt);
+                    }
+                    break;
+                case casacore::TpDouble: {
+                    casacore::Double numericVal = attributes.asDouble(field);
+                    *headerEntry->mutable_value() = fmt::format("{}", numericVal);
+                    headerEntry->set_entry_type(EntryType::FLOAT);
+                    headerEntry->set_numeric_value(numericVal);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // width, height; depth, stokes for 3D image
+        casacore::Int64 naxis3(-1), naxis4(-1);
+        if (dataShape.size() > 0) {
+            extendedInfo->set_width(dataShape(0));
+            extendedInfo->set_height(dataShape(1));
+            if (ndims == 3) {
+                extendedInfo->set_depth(dataShape(2));
+                extendedInfo->set_stokes(1);
+            }
+        } else {
+            casacore::Int64 naxis;
+            bool ok;
+            ok = getIntAttribute(naxis, attributes, "NAXIS1");
+            if (ok) extendedInfo->set_width(naxis);
+            ok = getIntAttribute(naxis, attributes, "NAXIS2");
+            if (ok) extendedInfo->set_height(naxis);
+            if (ndims > 2) {
+                ok = getIntAttribute(naxis3, attributes, "NAXIS3");
+                if (ok && ndims==3) {
+                    extendedInfo->set_depth(naxis3);
+                    extendedInfo->set_stokes(1);
+                }
+            }
+            if (ndims > 3)
+                ok = getIntAttribute(naxis4, attributes, "NAXIS4");
+        }
+
+        // if in header, get values for computed entries
+        // string values
+        std::string coordinateTypeX, coordinateTypeY, coordinateType4, radeSys, equinox,
+            specSys, bunit, crpix1, crpix2, cunit1, cunit2;
+        if (attributes.isDefined("CTYPE1"))
+            coordinateTypeX = attributes.asString("CTYPE1");
+        if (attributes.isDefined("CTYPE2"))
+            coordinateTypeY = attributes.asString("CTYPE2");
+        if (attributes.isDefined("CTYPE4"))
+            coordinateType4 = attributes.asString("CTYPE4");
+        if (attributes.isDefined("RADESYS"))
+            radeSys = attributes.asString("RADESYS");
+        if (attributes.isDefined("SPECSYS"))
+            specSys = attributes.asString("SPECSYS");
+        if (attributes.isDefined("BUNIT"))
+            bunit = attributes.asString("BUNIT");
+        if (attributes.isDefined("CUNIT1"))
+            cunit1 = attributes.asString("CUNIT1");
+        if (attributes.isDefined("CUNIT2"))
+            cunit2 = attributes.asString("CUNIT2");
+        // convert numeric to string
+        double val;
+        bool ok;
+        ok = getDoubleAttribute(val, attributes, "EQUINOX");
+        if (ok) equinox = casacore::String::toString(val);
+        ok = getDoubleAttribute(val, attributes, "CRPIX1");
+        if (ok) crpix1 = casacore::String::toString(val);
+        ok = getDoubleAttribute(val, attributes, "CRPIX2");
+        if (ok) crpix2 = casacore::String::toString(val);
+        // numeric values
+        double crval1 = (getDoubleAttribute(val, attributes, "CRVAL1") ? val : 0.0);
+        double crval2 = (getDoubleAttribute(val, attributes, "CRVAL2") ? val : 0.0);
+        double cdelt1 = (getDoubleAttribute(val, attributes, "CDELT1") ? val : 0.0);
+        double cdelt2 = (getDoubleAttribute(val, attributes, "CDELT2") ? val : 0.0);
+
+        // depth, stokes for 4D image
+        bool stokesIsAxis4(true);  // could be axis 3 or 4
+        if (ndims == 4) {
+            int axis3size(dataShape.size() > 0 ? dataShape(2) : naxis3);
+            int axis4size(dataShape.size() > 0 ? dataShape(3) : naxis4);
+            if (coordinateType4=="STOKES") { 
+                extendedInfo->set_depth(axis3size);
+                extendedInfo->set_stokes(axis4size);
+            } else {
+                extendedInfo->set_depth(axis4size);
+                extendedInfo->set_stokes(axis3size);
+                stokesIsAxis4 = false;
+            }
+        }
+
+        // make computed entries strings
+        std::string crPixels, crCoords, crDegStr, axisInc;
+        if (!crpix1.empty() && !crpix2.empty())
+            crPixels = fmt::format("[{}, {}] ", crpix1, crpix2);
+        if (!(crval1 == 0.0 && crval2 == 0.0)) 
+            crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval1, cunit1, crval2, cunit2);
+        crDegStr = makeDegStr(coordinateTypeX, crval1, crval2, cunit1, cunit2);
+        if (!(cdelt1 == 0.0 && cdelt2 == 0.0)) 
+            axisInc = fmt::format("{} {}, {} {}", cdelt1, cunit1, cdelt2, cunit2);
+        makeRadesysStr(radeSys, equinox);
+
+        // fill computed_entries
+        addComputedEntries(extendedInfo, coordinateTypeX, coordinateTypeY, crPixels, crCoords, crDegStr,
+            radeSys, specSys, bunit, axisInc, stokesIsAxis4);
+    } catch (casacore::AipsError& err) {
+        message = "Error opening HDF5 file";
+        return false;
     }
-    return extInfoOK;
+    return true;
 }
 
 bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string& hdu, string& message) {
@@ -359,7 +494,7 @@ bool FileInfoLoader::fillFITSExtFileInfo(FileInfoExtended* extendedInfo, string&
                             crpix2 = std::to_string(static_cast<int>(numericValue));
                         else if (headerEntry->name() == "CDELT1")
                             cdelt1 = numericValue;
-			else if (headerEntry->name() == "CDELT2")
+                        else if (headerEntry->name() == "CDELT2")
                             cdelt2 = numericValue;
                         break;
                     }
@@ -505,7 +640,7 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         casacore::Vector<casacore::Double> axRefVal(imSummary.referenceValues());
         casacore::Vector<casacore::Double> axInc(imSummary.axisIncrements());
         casacore::Vector<casacore::String> axUnits(imSummary.axisUnits());
-	size_t axisSize(axNames.size());
+        size_t axisSize(axNames.size());
         for (casacore::uInt i=0; i<axisSize; ++i) {
             casacore::String suffix(casacore::String::toString(i+1));
             // name = CTYPE
@@ -548,13 +683,13 @@ bool FileInfoLoader::fillCASAExtFileInfo(FileInfoExtended* extendedInfo, string&
         }
         // cr coords
         std::string crPixels, crCoords, crDegStr, axisInc;
-	if (axisSize > 1) {
-	    std::string crpix0(std::to_string(static_cast<int>(axRefPix(0)))),
-	                crpix1(std::to_string(static_cast<int>(axRefPix(1)))),
+        if (axisSize > 1) {
+            std::string crpix0(std::to_string(static_cast<int>(axRefPix(0)))),
+                        crpix1(std::to_string(static_cast<int>(axRefPix(1)))),
                         cunit0(axUnits(0)),
                         cunit1(axUnits(1));
-	    double crval0(axRefVal(0)), cdelt0(axInc(0)),
-	           crval1(axRefVal(1)), cdelt1(axInc(1));
+            double crval0(axRefVal(0)), cdelt0(axInc(0)),
+                   crval1(axRefVal(1)), cdelt1(axInc(1));
             crPixels = fmt::format("[{}, {}]", crpix0, crpix1);
             crCoords = fmt::format("[{:.4f} {}, {:.4f} {}]", crval0, cunit0, crval1, cunit1);
             crDegStr = makeDegStr(coordinateTypeX, crval0, crval1, cunit0, cunit1);
