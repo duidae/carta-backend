@@ -67,8 +67,24 @@ typename HDF5Loader::image_ref HDF5Loader::loadData(FileInfo::Data ds) {
     return dataSets[data];
 }
 
+#ifdef MAC_FIX
+struct EnumClassHash {
+    template <typename T>
+    using utype_t = typename std::underlying_type<T>::type;
+
+    template <typename T>
+    utype_t<T> operator()(T t) const {
+        return static_cast<utype_t<T>>(t);
+    }
+};
+#endif//MAC_FIX
+
 std::string HDF5Loader::dataSetToString(FileInfo::Data ds) {
+#ifdef MAC_FIX
+    static std::unordered_map<FileInfo::Data, std::string, EnumClassHash> um = {
+#else
     static std::unordered_map<FileInfo::Data, std::string> um = {
+#endif//MAC_FIX
         { FileInfo::Data::XY,         "DATA" },
         { FileInfo::Data::XYZ,        "DATA" },
         { FileInfo::Data::XYZW,       "DATA" },
