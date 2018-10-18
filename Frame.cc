@@ -590,7 +590,7 @@ void Frame::getProfileSlicer(casacore::Slicer& latticeSlicer, int x, int y, int 
         if (channel<0) { // get spectral profile with stokes
             if (stokesAxis==2) {
                 start.append(casacore::IPosition(2,stokes,0));
-                count.append(casacore::IPosition(2,1,imageShape(2)));
+                count.append(casacore::IPosition(2,1,imageShape(3)));
             } else {
                 start.append(casacore::IPosition(2,0,stokes));
                 count.append(casacore::IPosition(2,imageShape(2),1));
@@ -867,7 +867,7 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
-	std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
+        std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
         int x(ctrlPts[0].x()), y(ctrlPts[0].y());
         profileData.set_x(x);
         profileData.set_y(y);
@@ -931,23 +931,17 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
         profileData.set_progress(1.0); // for now (cursor), send all at once
         // Set channel vals
         // get slicer
-	std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
+        std::vector<CARTA::Point> ctrlPts = region->getControlPoints();
         int x(ctrlPts[0].x()), y(ctrlPts[0].y());
         casacore::Slicer lattSlicer;
         getProfileSlicer(lattSlicer, x, y, -1, currStokes);
-        // get zprofile
-        casacore::Array<float> tmp;
-        loader->loadData(FileInfo::Data::XYZW).getSlice(tmp, lattSlicer);
-        std::vector<float> zprofile(tmp.tovector());
-        *profileData.mutable_channel_vals() = {zprofile.begin(), zprofile.end()};
         // set stats profiles
         for (size_t i=0; i<region->numSpectralProfiles(); ++i) {
             // get sublattice for stokes requested in profile
             int profileStokes;
             if (region->getSpectralConfigStokes(profileStokes, i)) {
-                if (profileStokes != currStokes) {
+                if (profileStokes != currStokes)
                     getProfileSlicer(lattSlicer, x, y, -1, profileStokes);
-                }
                 casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
                 region->fillProfileStats(i, profileData, subLattice);
             }

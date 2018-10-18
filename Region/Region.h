@@ -46,7 +46,7 @@ public:
     bool getSpectralConfigStokes(int& stokes, int profileIndex);
     bool getSpectralConfig(CARTA::SetSpectralRequirements_SpectralConfig& config, int profileIndex);
     void fillProfileStats(int profileIndex, CARTA::SpectralProfileData& profileData, 
-        const casacore::SubLattice<float>& lattice);
+        casacore::SubLattice<float>& lattice);
 
     // Region Stats
     void setStatsRequirements(const std::vector<int>& statsTypes);

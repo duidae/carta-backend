@@ -328,6 +328,7 @@ void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
         frame->setCursorRegion(CURSOR_REGION_ID, message.point());
         if (message.has_spatial_requirements()) {
             onSetSpatialRequirements(message.spatial_requirements(), requestId);
+            sendSpectralProfileData(fileId, CURSOR_REGION_ID);
         } else {
             // RESPONSE
             sendSpatialProfileData(fileId, CURSOR_REGION_ID);

@@ -99,26 +99,40 @@ bool Region::getSpectralConfigStokes(int& stokes, int profileIndex) {
 }
 
 void Region::fillProfileStats(int profileIndex, CARTA::SpectralProfileData& profileData,
-    const casacore::SubLattice<float>& lattice) {
+    casacore::SubLattice<float>& lattice) {
     // Fill SpectralProfileData with statistics values according to config stored in RegionProfiler;
     // RegionStats does calculations
     CARTA::SetSpectralRequirements_SpectralConfig config;
     if (m_profiler->getSpectralConfig(config, profileIndex)) {
-        // get config coordinate and stats types
         std::string coordinate(config.coordinate());
-        const std::vector<int> requestedStats(config.stats_types().begin(), config.stats_types().end());
-        size_t nstats = requestedStats.size();
-        // get values from RegionStats
-        std::vector<std::vector<float>> statsValues; // a float vector for each stats type
-        if (m_stats->getStatsValues(statsValues, requestedStats, lattice)) {
-            for (size_t i=0; i<nstats; ++i) {
-                // one SpectralProfile per stats type
-                auto newProfile = profileData.add_profiles();
-                newProfile->set_coordinate(coordinate);
-                auto statType = static_cast<CARTA::StatsType>(requestedStats[i]);
-                newProfile->set_stats_type(statType);
-                std::vector<float> svalues(statsValues[i]);
-                *newProfile->mutable_vals() = {svalues.begin(), svalues.end()};
+        casacore::IPosition lattShape(lattice.shape());
+        if (lattShape(0)==1 && lattShape(1)==1) { // cursor region, no stats computed
+            auto newProfile = profileData.add_profiles();
+            newProfile->set_coordinate(coordinate);
+            newProfile->set_stats_type(CARTA::StatsType::None);
+            // get subLattice spectral axis
+            casacore::IPosition start(lattShape.size(), 0);
+            casacore::IPosition count(lattShape);
+            casacore::Slicer slicer(start, count);
+            casacore::Array<float> buffer;
+            lattice.doGetSlice(buffer, slicer);
+            std::vector<float> svalues = buffer.tovector();
+            *newProfile->mutable_vals() = {svalues.begin(), svalues.end()};
+        } else {
+            // get values from RegionStats
+            const std::vector<int> requestedStats(config.stats_types().begin(), config.stats_types().end());
+            size_t nstats = requestedStats.size();
+            std::vector<std::vector<float>> statsValues; // a float vector for each stats type
+            if (m_stats->getStatsValues(statsValues, requestedStats, lattice)) {
+                for (size_t i=0; i<nstats; ++i) {
+                    // one SpectralProfile per stats type
+                    auto newProfile = profileData.add_profiles();
+                    newProfile->set_coordinate(coordinate);
+                    auto statType = static_cast<CARTA::StatsType>(requestedStats[i]);
+                    newProfile->set_stats_type(statType);
+                    std::vector<float> svalues(statsValues[i]);
+                    *newProfile->mutable_vals() = {svalues.begin(), svalues.end()};
+                }
             }
         }
     }
