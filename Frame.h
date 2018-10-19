@@ -78,7 +78,7 @@ public:
     int currentMip();
 
     // image channels
-    bool setImageChannels(size_t newChannel, size_t newStokes);
+    bool setImageChannels(size_t newChannel, size_t newStokes, std::string& message);
     int currentStokes();
     int currentChannel();
 
@@ -89,7 +89,7 @@ public:
     bool setRegionControlPoints(int regionId, std::vector<CARTA::Point>& points);
     bool setRegionRotation(int regionId, float rotation);
     // setRegion for cursor (defaults for fields not in SET_CURSOR)
-    void setCursorRegion(int regionId, const CARTA::Point& point);
+    bool setCursorRegion(int regionId, const CARTA::Point& point);
 
     // set requirements
     bool setRegionHistogramRequirements(int regionId,
@@ -100,8 +100,8 @@ public:
     bool setRegionStatsRequirements(int regionId, const std::vector<int> statsTypes);
 
     // get region histograms, profiles
-    void fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData);
-    void fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
-    void fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData);
-    void fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData);
+    bool fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData);
+    bool fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
+    bool fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData);
+    bool fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData);
 };

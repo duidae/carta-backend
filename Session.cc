@@ -125,7 +125,7 @@ FileListResponse Session::getFileList(string folder) {
 
                 if (addImage) { // add image to file list
                     auto fileInfo = fileList.add_files();
-                    fillFileInfo(fileInfo, fullpath);
+                    bool ok = fillFileInfo(fileInfo, fullpath);
                 }
                 dirIter++;
             }
@@ -280,21 +280,23 @@ void Session::onSetImageView(const SetImageView& message, uint32_t requestId) {
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         // set new view in Frame
-        if (!frame->setBounds(message.image_bounds(), message.mip())) {
-            // TODO: Error handling on bounds
+        if (frame->setBounds(message.image_bounds(), message.mip())) {
+            // save compression settings for sending raster data
+            CARTA::CompressionType ctype(message.compression_type());
+            int numsets(message.num_subsets());
+            float quality(message.compression_quality());
+            setCompression(ctype, quality, numsets);
+            // RESPONSE
+            CARTA::RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
+            sendRasterImageData(fileId, requestId, histogramData);
+        } else {
+            string error = "Image bounds out of range; cannot update image";
+            sendLogEvent(error, {"image-view"}, CARTA::ErrorSeverity::ERROR);
         }
-        // save compression settings for sending raster data
-        CARTA::CompressionType ctype(message.compression_type());
-        int numsets(message.num_subsets());
-        float quality(message.compression_quality());
-        setCompression(ctype, quality, numsets);
-        // RESPONSE
-        CARTA::RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
-        sendRasterImageData(fileId, requestId, histogramData);
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-view"}, CARTA::ErrorSeverity::ERROR);
     }
-
 }
 
 void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_t requestId) {
@@ -304,7 +306,8 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
         size_t newChannel(message.channel()), newStokes(message.stokes());
         bool channelChanged(newChannel != frame->currentChannel()),
              stokesChanged(newStokes != frame->currentStokes());
-        if (frame->setImageChannels(message.channel(), message.stokes())) {
+        string errMessage;
+        if (frame->setImageChannels(message.channel(), message.stokes(), errMessage)) {
             // RESPONSE: updated histogram, spatial profile, spectral profile
             // Histogram message now managed by the raster image data
             RegionHistogramData* histogramData = getRegionHistogramData(fileId, IMAGE_REGION_ID);
@@ -314,10 +317,11 @@ void Session::onSetImageChannels(const CARTA::SetImageChannels& message, uint32_
             if (stokesChanged)
                 sendSpectralProfileData(fileId, CURSOR_REGION_ID);
         } else {
-            // TODO: Error handling on bounds
+            sendLogEvent(errMessage, {"image-channels"}, CARTA::ErrorSeverity::ERROR);
         }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-channels"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -325,17 +329,22 @@ void Session::onSetCursor(const CARTA::SetCursor& message, uint32_t requestId) {
     auto fileId(message.file_id());
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
-        frame->setCursorRegion(CURSOR_REGION_ID, message.point());
-        if (message.has_spatial_requirements()) {
-            onSetSpatialRequirements(message.spatial_requirements(), requestId);
-            sendSpectralProfileData(fileId, CURSOR_REGION_ID);
+        if (frame->setCursorRegion(CURSOR_REGION_ID, message.point())) {
+            if (message.has_spatial_requirements()) {
+                onSetSpatialRequirements(message.spatial_requirements(), requestId);
+                sendSpectralProfileData(fileId, CURSOR_REGION_ID);
+            } else {
+                // RESPONSE
+                sendSpatialProfileData(fileId, CURSOR_REGION_ID);
+                sendSpectralProfileData(fileId, CURSOR_REGION_ID);
+            }
         } else {
-            // RESPONSE
-            sendSpatialProfileData(fileId, CURSOR_REGION_ID);
-            sendSpectralProfileData(fileId, CURSOR_REGION_ID);
+            string error = "Cursor point out of range";
+            sendLogEvent(error, {"set-cursor"}, CARTA::ErrorSeverity::ERROR);
         }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-cursor"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -344,11 +353,17 @@ void Session::onSetSpatialRequirements(const CARTA::SetSpatialRequirements& mess
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         auto regionId = message.region_id();
-        frame->setRegionSpatialRequirements(regionId, vector<string>(message.spatial_profiles().begin(), message.spatial_profiles().end()));
-        // RESPONSE
-        sendSpatialProfileData(fileId, regionId);
+        if (frame->setRegionSpatialRequirements(regionId, vector<string>(message.spatial_profiles().begin(),
+            message.spatial_profiles().end()))) {
+            // RESPONSE
+            sendSpatialProfileData(fileId, regionId);
+        } else {
+            string error = fmt::format("Spatial requirements for region id {} failed to validate ", regionId);
+            sendLogEvent(error, {"set-spatial"}, CARTA::ErrorSeverity::ERROR);
+        }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-spatial"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -357,12 +372,22 @@ void Session::onSetHistogramRequirements(const CARTA::SetHistogramRequirements& 
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         auto regionId = message.region_id();
-        frame->setRegionHistogramRequirements(regionId, vector<CARTA::SetHistogramRequirements_HistogramConfig>(message.histograms().begin(), message.histograms().end()));
-        // RESPONSE
-        RegionHistogramData* histogramData = getRegionHistogramData(fileId, regionId);
-        sendEvent("REGION_HISTOGRAM_DATA", requestId, *histogramData);
+        if (frame->setRegionHistogramRequirements(regionId, vector<CARTA::SetHistogramRequirements_HistogramConfig>(message.histograms().begin(), message.histograms().end()))) {
+            // RESPONSE
+            RegionHistogramData* histogramData = getRegionHistogramData(fileId, regionId);
+            if (histogramData != nullptr) {
+                sendEvent("REGION_HISTOGRAM_DATA", requestId, *histogramData);
+            } else {
+                string error = "Failed to load histogram data";
+                sendLogEvent(error, {"set-histogram"}, CARTA::ErrorSeverity::ERROR);
+            }
+        } else {
+            string error = fmt::format("Histogram requirements for region id {} failed to validate ", regionId);
+            sendLogEvent(error, {"set-histogram"}, CARTA::ErrorSeverity::ERROR);
+        }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-histogram"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -371,13 +396,18 @@ void Session::onSetSpectralRequirements(const CARTA::SetSpectralRequirements& me
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         auto regionId = message.region_id();
-        frame->setRegionSpectralRequirements(regionId,
+        if (frame->setRegionSpectralRequirements(regionId,
             vector<CARTA::SetSpectralRequirements_SpectralConfig>(message.spectral_profiles().begin(),
-            message.spectral_profiles().end()));
-        // RESPONSE
-        sendSpectralProfileData(fileId, regionId);
+            message.spectral_profiles().end()))) {
+            // RESPONSE
+            sendSpectralProfileData(fileId, regionId);
+        } else {
+            string error = fmt::format("Spectral requirements for region id {} failed to validate ", regionId);
+            sendLogEvent(error, {"set-spectral"}, CARTA::ErrorSeverity::ERROR);
+        }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-spectral"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -386,11 +416,16 @@ void Session::onSetStatsRequirements(const CARTA::SetStatsRequirements& message,
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         auto regionId = message.region_id();
-        frame->setRegionStatsRequirements(regionId, vector<int>(message.stats().begin(), message.stats().end()));
-        // RESPONSE
-        sendRegionStatsData(fileId, regionId);
+        if (frame->setRegionStatsRequirements(regionId, vector<int>(message.stats().begin(), message.stats().end()))) {
+            // RESPONSE
+            sendRegionStatsData(fileId, regionId);
+        } else {
+            string error = fmt::format("Stats requirements for region id {} failed to validate ", regionId);
+            sendLogEvent(error, {"set-stats"}, CARTA::ErrorSeverity::ERROR);
+        }
     } else {
-        // TODO: error handling
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-stats"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -477,6 +512,9 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
             }
             // Send completed event to client
             sendEvent("RASTER_IMAGE_DATA", requestId, rasterImageData);
+        } else {
+            string error = "Raster image data failed to load";
+            sendLogEvent(error, {"raster-data"}, CARTA::ErrorSeverity::ERROR);
         }
     }
 }
@@ -485,10 +523,17 @@ void Session::sendSpatialProfileData(int fileId, int regionId) {
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         CARTA::SpatialProfileData spatialProfileData;
-        spatialProfileData.set_file_id(fileId);
-        spatialProfileData.set_region_id(regionId);
-        frame->fillSpatialProfileData(regionId, spatialProfileData);
-        sendEvent("SPATIAL_PROFILE_DATA", 0, spatialProfileData);
+        if (frame->fillSpatialProfileData(regionId, spatialProfileData)) {
+            spatialProfileData.set_file_id(fileId);
+            spatialProfileData.set_region_id(regionId);
+            sendEvent("SPATIAL_PROFILE_DATA", 0, spatialProfileData);
+        } else {
+            string error = "Spatial profile data failed to load";
+            sendLogEvent(error, {"spatial-profile"}, CARTA::ErrorSeverity::ERROR);
+        }
+    } else {
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"spatial-profile"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -496,10 +541,17 @@ void Session::sendSpectralProfileData(int fileId, int regionId) {
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         CARTA::SpectralProfileData spectralProfileData;
-        spectralProfileData.set_file_id(fileId);
-        spectralProfileData.set_region_id(regionId);
-        frame->fillSpectralProfileData(regionId, spectralProfileData);
-        sendEvent("SPECTRAL_PROFILE_DATA", 0, spectralProfileData);
+        if (frame->fillSpectralProfileData(regionId, spectralProfileData)) {
+            spectralProfileData.set_file_id(fileId);
+            spectralProfileData.set_region_id(regionId);
+            sendEvent("SPECTRAL_PROFILE_DATA", 0, spectralProfileData);
+        } else {
+            string error = "Spectral profile data failed to load";
+            sendLogEvent(error, {"spectral-profile"}, CARTA::ErrorSeverity::ERROR);
+        }
+    } else {
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"spectral-profile"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 
@@ -507,10 +559,17 @@ void Session::sendRegionStatsData(int fileId, int regionId) {
     if (frames.count(fileId)) {
         auto& frame = frames[fileId];
         CARTA::RegionStatsData regionStatsData;
-        regionStatsData.set_file_id(fileId);
-        regionStatsData.set_region_id(regionId);
-        frame->fillRegionStatsData(regionId, regionStatsData);
-        sendEvent("REGION_STATS_DATA", 0, regionStatsData);
+        if (frame->fillRegionStatsData(regionId, regionStatsData)) {
+            regionStatsData.set_file_id(fileId);
+            regionStatsData.set_region_id(regionId);
+            sendEvent("REGION_STATS_DATA", 0, regionStatsData);
+        } else {
+            string error = "Region stats data failed to load";
+            sendLogEvent(error, {"region-stats"}, CARTA::ErrorSeverity::ERROR);
+        }
+    } else {
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"region-stats"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 

@@ -40,7 +40,8 @@ Frame::Frame(const string& uuidString, const string& filename, const string& hdu
         // sendLogEvent(axesInfo, {"file"}, CARTA::ErrorSeverity::DEBUG);
 
         // set current channel, stokes, channelCache
-        valid = setImageChannels(defaultChannel, 0);
+        std::string errMessage;
+        valid = setImageChannels(defaultChannel, 0, errMessage);
 
         // make Region for entire image (after current channel/stokes set)
         setImageRegion();
@@ -467,15 +468,22 @@ int Frame::currentMip() {
 // ********************************************************************
 // Image channels
 
-bool Frame::setImageChannels(size_t newChannel, size_t newStokes) {
+bool Frame::setImageChannels(size_t newChannel, size_t newStokes, std::string& message) {
     if (!valid) {
-        log(uuid, "No file loaded");
+        message = "No file loaded";
+        log(uuid, message);
         return false;
     } else {
         size_t depth(chanAxis>=0 ? imageShape(chanAxis) : 1);
+        if (newChannel < 0 || newChannel >= depth) {
+            message = fmt::format("Channel {} is invalid in file {}", newChannel, filename);
+            log(uuid, message);
+            return false;
+        }
         size_t nstokes(stokesAxis>=0 ? imageShape(stokesAxis) : 1);
-        if (newChannel < 0 || newChannel >= depth || newStokes < 0 || newStokes >= nstokes) {
-            log(uuid, "Channel {} (stokes {}) is invalid in file {}", newChannel, newStokes, filename);
+        if (newStokes < 0 || newStokes >= nstokes) {
+            message = fmt::format("Stokes {} is invalid in file {}", newStokes, filename);
+            log(uuid, message);
             return false;
         }
     }
@@ -632,24 +640,37 @@ bool Frame::setRegion(int regionId, std::string name, CARTA::RegionType type, bo
 bool Frame::setRegionChannels(int regionId, int minchan, int maxchan, std::vector<int>& stokes) {
     // set chans to current if -1; set stokes to current if empty
     if (regions.count(regionId)) {
+        // validate
+        int nchan(chanAxis>=0 ? imageShape(chanAxis) : 1);
+        if (minchan > nchan || maxchan > nchan)
+            return false;
+        int nstokes(stokesAxis>=0 ? imageShape(stokesAxis) : 1);
+        for (auto stoke : stokes)
+            if (stoke > nstokes)
+                return false;
+        // set
         auto& region = regions[regionId];
-        // ICD SET_REGION: if empty, use current Stokes value
-        if (stokes.empty()) stokes.push_back(currentStokes());
         region->setChannels(minchan, maxchan, stokes);
         return true;
     } else {
-        // TODO: error handling
         return false;
     }
 }
 
 bool Frame::setRegionControlPoints(int regionId, std::vector<CARTA::Point>& points) {
+    // validate and set one or more control points for region 
     if (regions.count(regionId)) {
+        // validate
+        for (auto& point : points) {
+            float x(point.x()), y(point.y());
+            if ((x < 0 || x >= imageShape(0)) || (y < 0 || y >= imageShape(1)))
+                return false;
+        }
+        // set
         auto& region = regions[regionId];
         region->setControlPoints(points);
         return true;
     } else {
-        // TODO: error handling
         return false;
     }
 }
@@ -660,7 +681,6 @@ bool Frame::setRegionRotation(int regionId, float rotation) {
         region->setRotation(rotation);
         return true;
     } else {
-        // TODO: error handling
         return false;
     }
 }
@@ -696,37 +716,30 @@ void Frame::setImageRegion() {
     setRegionHistogramRequirements(IMAGE_REGION_ID, configs);
 }
 
-void Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
+bool Frame::setCursorRegion(int regionId, const CARTA::Point& point) {
     // a cursor is a region with one control point
     std::vector<CARTA::Point> points;
     points.push_back(point);
 
     if (regions.count(regionId)) {
         // update point
-        setRegionControlPoints(regionId, points);
+        return setRegionControlPoints(regionId, points);
     } else {
         // set up new region
         setRegion(regionId, "cursor", CARTA::POINT);
         // use current channel and stokes for cursor
-        int currentChan(currentChannel());
+        int chan(-1);
         std::vector<int> stokes;
-        stokes.push_back(currentStokes());
-        setRegionChannels(regionId, currentChan, currentChan, stokes);
-
+        setRegionChannels(regionId, chan, chan, stokes);
         // control point is cursor position
-        setRegionControlPoints(regionId, points);
-
-        // histogram requirements: use current channel
-        std::vector<CARTA::SetHistogramRequirements_HistogramConfig> configs;
-        setRegionHistogramRequirements(regionId, configs);
-
+        bool ok = setRegionControlPoints(regionId, points);
         // spatial requirements
         std::vector<std::string> spatialProfiles;
         setRegionSpatialRequirements(regionId, spatialProfiles);
-
         // spectral requirements
         std::vector<CARTA::SetSpectralRequirements_SpectralConfig> spectralProfiles;
         setRegionSpectralRequirements(regionId, spectralProfiles);
+        return ok;
     }
 }
 
@@ -751,7 +764,6 @@ bool Frame::setRegionHistogramRequirements(int regionId,
             return region->setHistogramRequirements(histograms);
         }
     } else {
-        // TODO: error handling
         return false;
     }
 }
@@ -777,7 +789,6 @@ bool Frame::setRegionSpatialRequirements(int regionId, const std::vector<std::st
             return region->setSpatialRequirements(profiles, nstokes, currentStokes());
         }
     } else {
-        // TODO: error handling
         return false;
     }
 }
@@ -806,7 +817,6 @@ bool Frame::setRegionSpectralRequirements(int regionId,
             return region->setSpectralRequirements(profiles, nstokes, currentStokes());
         }
     } else {
-        // TODO: error handling
         return false;
     }
 }
@@ -815,15 +825,15 @@ bool Frame::setRegionStatsRequirements(int regionId, const std::vector<int> stat
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         region->setStatsRequirements(statsTypes);
+        return true;
     } else {
-        // TODO: error handling
         return false;
     }
 }
 
 // ***** region data *****
 
-void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData) {
+bool Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* histogramData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         histogramData->set_stokes(currentStokes());
@@ -860,10 +870,12 @@ void Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* hi
                 }
             }
         }
+    } else {
+        return false;
     }
 }
 
-void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData) {
+bool Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
@@ -919,10 +931,12 @@ void Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
             }
             *newProfile->mutable_values() = {profile.begin(), profile.end()};
         }
+    } else {
+        return false;
     }
 }
 
-void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData) {
+bool Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         // set profile parameters
@@ -946,20 +960,23 @@ void Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
                 region->fillProfileStats(i, profileData, subLattice);
             }
         }
+    } else {
+        return false;
     }
 }
 
-void Frame::fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData) {
+bool Frame::fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData) {
     if (regions.count(regionId)) {
         auto& region = regions[regionId];
         int currChan(currentChannel()), currStokes(currentStokes());
         statsData.set_channel(currChan);
         statsData.set_stokes(currStokes);
         casacore::Slicer lattSlicer;
-        //if ((regionId<=CURSOR_REGION_ID))
         lattSlicer = getChannelMatrixSlicer(currChan, currStokes);  // for entire 2D image, for now
         casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
         region->fillStatsData(statsData, subLattice);
+    } else {
+        return false;
     }
 }
 
