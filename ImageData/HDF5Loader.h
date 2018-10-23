@@ -67,7 +67,9 @@ typename HDF5Loader::image_ref HDF5Loader::loadData(FileInfo::Data ds) {
     return dataSets[data];
 }
 
-#ifdef MAC_FIX
+// This is necessary on some systems where the compiler
+// cannot infer the implicit cast to the enum class's
+// underlying type (e.g. MacOS, CentOS7).
 struct EnumClassHash {
     template <typename T>
     using utype_t = typename std::underlying_type<T>::type;
@@ -77,14 +79,9 @@ struct EnumClassHash {
         return static_cast<utype_t<T>>(t);
     }
 };
-#endif//MAC_FIX
 
 std::string HDF5Loader::dataSetToString(FileInfo::Data ds) {
-#ifdef MAC_FIX
     static std::unordered_map<FileInfo::Data, std::string, EnumClassHash> um = {
-#else
-    static std::unordered_map<FileInfo::Data, std::string> um = {
-#endif//MAC_FIX
         { FileInfo::Data::XY,         "DATA" },
         { FileInfo::Data::XYZ,        "DATA" },
         { FileInfo::Data::XYZW,       "DATA" },

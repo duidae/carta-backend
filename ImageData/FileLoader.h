@@ -9,11 +9,7 @@ namespace carta {
 
 namespace FileInfo {
 
-#ifndef MAC_FIX2
 enum class Data : uint32_t
-#else
-enum Data
-#endif//MAC_FIX2
 {
      // Standard layouts
     XY, XYZ, XYZW,
