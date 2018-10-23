@@ -16,7 +16,7 @@ using namespace std;
 using namespace CARTA;
 
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
-Session::Session(uWS::WebSocket<uWS::SERVER>* ws, std::string uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async outgoing, bool verbose)
+Session::Session(uWS::WebSocket<uWS::SERVER>* ws, std::string uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async *outgoing, bool verbose)
     : uuid(std::move(uuid)),
       socket(ws),
       permissionsMap(permissionsMap),
@@ -31,6 +31,7 @@ Session::~Session() {
         frame.second.reset();
     }
     frames.clear();
+    outgoing->close();
 }
 
 bool Session::checkPermissionForEntry(string entry) {
@@ -586,7 +587,7 @@ void Session::sendEvent(string eventName, u_int64_t eventId, google::protobuf::M
     memcpy(msg.data() + eventNameLength, &eventId, 4);
     message.SerializeToArray(msg.data() + eventNameLength + 8, messageLength);
     out_msgs.push(msg);
-    outgoing.send();
+    outgoing->send();
     //socket->send(msg.data(), msg.size(), uWS::BINARY);
 }
 

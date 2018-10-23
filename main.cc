@@ -65,12 +65,12 @@ void readPermissions(string filename) {
 void onConnect(WebSocket<SERVER>* ws, HttpRequest httpRequest) {
     ws->setUserData(new std::string(boost::uuids::to_string(uuid_gen())));
     auto &uuid = *((std::string*)ws->getUserData());
-    uS::Async outgoing(h.getLoop());
-    outgoing.start(
-        [](uS::Async*) -> void {
-            for(auto &s : sessions) {
-                s.second->sendPendingMessages();
-            }
+    uS::Async *outgoing = new uS::Async(h.getLoop());
+    outgoing->setData(&uuid);
+    outgoing->start(
+        [](uS::Async *async) -> void {
+            auto uuid = *((std::string*)async->getData());
+            sessions[uuid]->sendPendingMessages();
         });
     sessions[uuid] = new Session(ws, uuid, permissionsMap, usePermissions, baseFolder, outgoing, verbose);
     animationQueues[uuid] = new carta::AnimationQueue(sessions[uuid]);

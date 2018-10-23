@@ -54,7 +54,7 @@ protected:
     std::unordered_map<int, std::unique_ptr<Frame>> frames;
 
     // Notification mechanism when outgoing messages are ready
-    uS::Async outgoing;
+    uS::Async *outgoing;
 
     // for data compression
     CompressionSettings compressionSettings;
@@ -68,7 +68,7 @@ public:
             std::unordered_map<std::string, std::vector<std::string>>& permissionsMap,
             bool enforcePermissions,
             std::string folder,
-            uS::Async outgoing,
+            uS::Async *outgoing,
             bool verbose = false);
     ~Session();
 
