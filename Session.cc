@@ -16,8 +16,8 @@ using namespace std;
 using namespace CARTA;
 
 // Default constructor. Associates a websocket with a UUID and sets the base folder for all files
-Session::Session(uWS::WebSocket<uWS::SERVER>* ws, boost::uuids::uuid uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async outgoing, bool verbose)
-    : uuid(uuid),
+Session::Session(uWS::WebSocket<uWS::SERVER>* ws, std::string uuid, unordered_map<string, vector<string>>& permissionsMap, bool enforcePermissions, string folder, uS::Async outgoing, bool verbose)
+    : uuid(std::move(uuid)),
       socket(ws),
       permissionsMap(permissionsMap),
       permissionsEnabled(enforcePermissions),
@@ -135,7 +135,7 @@ FileListResponse Session::getFileList(string folder) {
             return fileList;
         }
     } catch (casacore::AipsError& err) {
-        log(boost::uuids::to_string(uuid), "Error: {}", err.getMesg().c_str());
+        log(uuid, "Error: {}", err.getMesg().c_str());
         sendLogEvent(err.getMesg(), {"file-list"}, CARTA::ErrorSeverity::ERROR);
         fileList.set_success(false);
         fileList.set_message(err.getMesg());
@@ -205,7 +205,7 @@ void Session::onRegisterViewer(const RegisterViewer& message, uint32_t requestId
     apiKey = message.api_key();
     RegisterViewerAck ackMessage;
     ackMessage.set_success(true);
-    ackMessage.set_session_id(boost::uuids::to_string(uuid));
+    ackMessage.set_session_id(uuid);
     sendEvent("REGISTER_VIEWER_ACK", requestId, ackMessage);
 }
 
@@ -248,7 +248,7 @@ void Session::onOpenFile(const OpenFile& message, uint32_t requestId) {
         string filename(path.absoluteName());
         // create Frame for open file
         string hdu = fileInfo->hdu_list(0);
-        auto frame = unique_ptr<Frame>(new Frame(boost::uuids::to_string(uuid), filename, hdu));
+        auto frame = unique_ptr<Frame>(new Frame(uuid, filename, hdu));
         if (frame->isValid()) {
             ack.set_success(true);
             frames[message.file_id()] = move(frame);
@@ -504,7 +504,7 @@ void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionH
                                accumulate(compressedSizes.begin(), compressedSizes.end(), 0) * 1e-3,
                                1e-3 * dtCompress,
                                (float) (numRows * rowLength) / dtCompress);
-                    log(boost::uuids::to_string(uuid), compressionInfo);
+                    log(uuid, compressionInfo);
                     sendLogEvent(compressionInfo, {"zfp"}, CARTA::ErrorSeverity::DEBUG);
                 }
             } else {

@@ -2,8 +2,6 @@
 
 #include <fmt/format.h>
 #include <boost/multi_array.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>
 #include <mutex>
 #include <cstdio>
 #include <uWS/uWS.h>
@@ -38,7 +36,7 @@ struct CompressionSettings {
 
 class Session {
 public:
-    boost::uuids::uuid uuid;
+    std::string uuid;
 protected:
     // communication
     uWS::WebSocket<uWS::SERVER>* socket;
@@ -66,7 +64,7 @@ protected:
 
 public:
     Session(uWS::WebSocket<uWS::SERVER>* ws,
-            boost::uuids::uuid uuid,
+            std::string uuid,
             std::unordered_map<std::string, std::vector<std::string>>& permissionsMap,
             bool enforcePermissions,
             std::string folder,
