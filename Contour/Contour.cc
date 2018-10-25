@@ -6,6 +6,10 @@
 
 enum Edge {top, right, bottom, left, none};
 
+// This code is based on fvContour from the DS9 package.
+// The algorithm itself seems to be a variant of "Marching Squares"
+// (https://en.wikipedia.org/wiki/Marching_squares).
+
 casacore::Matrix<float> downSample(const casacore::Matrix<float> &matrix, int mip) {
     casacore::IPosition shape = matrix.shape();
     size_t numRowsRegion = shape(0) / mip;
