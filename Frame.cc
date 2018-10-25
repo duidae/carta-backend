@@ -1,3 +1,4 @@
+#include "Contour/Contour.h"
 #include "Frame.h"
 #include "util.h"
 
@@ -980,3 +981,17 @@ bool Frame::fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData)
     }
 }
 
+bool Frame::fillContourData(CARTA::ContourImageData &contours,
+                            const std::vector<float> &levels,
+                            CARTA::ContourMode contourMode, float smoothness) {
+    int currChan(currentChannel()), currStokes(currentStokes());
+    contours.set_channel(currChan);
+    contours.set_stokes(currStokes);
+    auto *contourSets = contours.mutable_contour_sets();
+    casacore::Slicer lattSlicer;
+    lattSlicer = getChannelMatrixSlicer(currChan, currStokes);
+    // TODO: respect image bounds instead of using the whole XY plane
+    casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
+    *contourSets = gatherContours(subLattice, levels, contourMode, smoothness);
+    return true;
+}

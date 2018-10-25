@@ -31,7 +31,8 @@ set(SOURCE_FILES
   Region/Histogram.cc
   OnMessageTask.cc
   AnimationQueue.cc
-  util.cc)
+  util.cc
+  Contour/Contour.cc)
 add_definitions(-DHAVE_HDF5)
 add_executable(hdf5_image_viewer ${SOURCE_FILES})
 target_link_libraries(hdf5_image_viewer ${LINK_LIBS})

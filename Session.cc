@@ -430,6 +430,25 @@ void Session::onSetStatsRequirements(const CARTA::SetStatsRequirements& message,
     }
 }
 
+void Session::onSetContourParameters(const CARTA::SetContourParameters& message, uint32_t requestId) {
+    auto fileId(message.file_id());
+    if(frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        const CARTA::ImageBounds &imageBounds = message.image_bounds();
+        auto channel = message.channel();
+        auto stokes = message.stokes();
+        std::vector<float> levels(message.levels().begin(), message.levels().end());
+        auto contourMode = message.contour_mode();
+        auto smoothness = message.smoothness();
+        if (/*frame->setContourParameters()*/ true) {
+            sendContourData(fileId, message.image_bounds(), levels, contourMode, smoothness);
+        }
+    } else {
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"set-contour"}, CARTA::ErrorSeverity::ERROR);
+    }
+}
+
 // ******** SEND DATA STREAMS *********
 
 void Session::sendRasterImageData(int fileId, uint32_t requestId, CARTA::RegionHistogramData* channelHistogram) {
@@ -571,6 +590,26 @@ void Session::sendRegionStatsData(int fileId, int regionId) {
     } else {
         string error = fmt::format("File id {} not found", fileId);
         sendLogEvent(error, {"region-stats"}, CARTA::ErrorSeverity::ERROR);
+    }
+}
+
+void Session::sendContourData(int fileId, const CARTA::ImageBounds &imageBounds,
+                              const std::vector<float> &levels,
+                              CARTA::ContourMode contourMode, float smoothness) {
+    if(frames.count(fileId)) {
+        auto& frame = frames[fileId];
+        CARTA::ContourImageData contourImageData;
+        *(contourImageData.mutable_image_bounds()) = imageBounds;
+        if (frame->fillContourData(contourImageData, levels, contourMode, smoothness)) {
+            contourImageData.set_file_id(fileId);
+            sendEvent("CONTOUR_IMAGE_DATA", 0, contourImageData);
+        } else {
+            string error = "Contour data failed to load";
+            sendLogEvent(error, {"contour-data"}, CARTA::ErrorSeverity::ERROR);
+        }
+    } else {
+        string error = fmt::format("File id {} not found", fileId);
+        sendLogEvent(error, {"contour-data"}, CARTA::ErrorSeverity::ERROR);
     }
 }
 

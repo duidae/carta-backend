@@ -16,6 +16,8 @@
 #include <carta-protobuf/file_info.pb.h>
 #include <carta-protobuf/open_file.pb.h>
 #include <carta-protobuf/close_file.pb.h>
+#include <carta-protobuf/contour.pb.h>
+#include <carta-protobuf/contour_image.pb.h>
 #include <carta-protobuf/set_image_view.pb.h>
 #include <carta-protobuf/set_image_channels.pb.h>
 #include <carta-protobuf/raster_image.pb.h>
@@ -85,6 +87,7 @@ public:
     void onSetHistogramRequirements(const CARTA::SetHistogramRequirements& message, uint32_t requestId);
     void onSetSpectralRequirements(const CARTA::SetSpectralRequirements& message, uint32_t requestId);
     void onSetStatsRequirements(const CARTA::SetStatsRequirements& message, uint32_t requestId);
+    void onSetContourParameters(const CARTA::SetContourParameters& message, uint32_t requestId);
 
     void sendPendingMessages();
 
@@ -107,6 +110,9 @@ protected:
     void sendSpatialProfileData(int fileId, int regionId);
     void sendSpectralProfileData(int fileId, int regionId);
     void sendRegionStatsData(int fileId, int regionId);
+    void sendContourData(int fileId, const CARTA::ImageBounds &imageBounds,
+                         const std::vector<float> &levels,
+                         CARTA::ContourMode contourMode, float smoothness);
 
     // data compression
     void setCompression(CARTA::CompressionType type, float quality, int nsubsets);

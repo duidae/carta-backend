@@ -9,6 +9,7 @@
 #include <carta-protobuf/region_histogram.pb.h>
 #include <carta-protobuf/spatial_profile.pb.h>
 #include <carta-protobuf/spectral_profile.pb.h>
+#include <carta-protobuf/contour_image.pb.h>
 #include "ImageData/FileLoader.h"
 #include "Region/Region.h"
 
@@ -104,4 +105,8 @@ public:
     bool fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& profileData);
     bool fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& profileData);
     bool fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData);
+
+    // get contours
+    bool fillContourData(CARTA::ContourImageData &contours, const std::vector<float> &levels,
+                         CARTA::ContourMode contourMode, float smoothness);
 };
