@@ -44,8 +44,8 @@ if(test)
   find_package(GTest)
   include_directories(${GTEST_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR})
 
-  add_executable(testPriorityCtpl test/TestPriorityCtpl.cpp)
-  target_link_libraries(testPriorityCtpl gtest gtest_main Threads::Threads)
+#  add_executable(Executable Source.cpp)
+#  target_link_libraries(Executable gtest gtest_main Threads::Threads)
 
-  add_test(NAME TestPCtpl COMMAND testPriorityCtpl)
+#  add_test(NAME TestName COMMAND Executable)
 endif(test)
