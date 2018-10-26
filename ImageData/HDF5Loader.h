@@ -112,13 +112,15 @@ int HDF5Loader::stokesAxis() {
     if (ctypeID > 0) {
         H5Aread(ctypeID, H5T_STRING, type);
         H5Aclose(ctypeID);
-        if (type=="STOKES") return 2;
+        std::string typestr3(type);
+        if (typestr3.compare("STOKES")) return 2;
         // read CTYPE4
         ctypeID = H5Aopen_name(groupId, "CTYPE4");
 	if (ctypeID > 0) {
             H5Aread(ctypeID, H5T_STRING, type);
+            std::string typestr4(type);
             H5Aclose(ctypeID);
-            if (type=="STOKES") return 3;
+            if (typestr4.compare("STOKES")) return 3;
         }
     }
     // no stokes axis

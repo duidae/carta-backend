@@ -468,7 +468,7 @@ int Frame::currentMip() {
 // ********************************************************************
 // Image channels
 
-bool Frame::setImageChannels(size_t newChannel, size_t newStokes, std::string& message) {
+bool Frame::setImageChannels(int newChannel, int newStokes, std::string& message) {
     if (!valid) {
         message = "No file loaded";
         log(uuid, message);
@@ -870,6 +870,7 @@ bool Frame::fillRegionHistogramData(int regionId, CARTA::RegionHistogramData* hi
                 }
             }
         }
+        return true;
     } else {
         return false;
     }
@@ -931,6 +932,7 @@ bool Frame::fillSpatialProfileData(int regionId, CARTA::SpatialProfileData& prof
             }
             *newProfile->mutable_values() = {profile.begin(), profile.end()};
         }
+        return true;
     } else {
         return false;
     }
@@ -960,6 +962,7 @@ bool Frame::fillSpectralProfileData(int regionId, CARTA::SpectralProfileData& pr
                 region->fillProfileStats(i, profileData, subLattice);
             }
         }
+        return true;
     } else {
         return false;
     }
@@ -975,6 +978,7 @@ bool Frame::fillRegionStatsData(int regionId, CARTA::RegionStatsData& statsData)
         lattSlicer = getChannelMatrixSlicer(currChan, currStokes);  // for entire 2D image, for now
         casacore::SubLattice<float> subLattice(loader->loadData(FileInfo::Data::XYZW), lattSlicer);
         region->fillStatsData(statsData, subLattice);
+        return true;
     } else {
         return false;
     }

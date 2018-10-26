@@ -78,7 +78,7 @@ public:
     int currentMip();
 
     // image channels
-    bool setImageChannels(size_t newChannel, size_t newStokes, std::string& message);
+    bool setImageChannels(int newChannel, int newStokes, std::string& message);
     int currentStokes();
     int currentChannel();
 
