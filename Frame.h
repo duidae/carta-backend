@@ -31,6 +31,7 @@ private:
     // setup
     std::string uuid;
     bool valid;
+    std::mutex testMutex;
 
     // image loader, shape, stats from image file
     std::string filename;
