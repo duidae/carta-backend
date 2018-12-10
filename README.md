@@ -17,9 +17,15 @@ cmake ..
 make
 ```
 
-By default, the server runs on port 3002 and looks for image files in the `$HOME/Images` directory.  These can be changed with command-line arguments, for example:
+Command-line arguments are in the format arg=value.  Available arguments include:
 ```
-carta_backend --port 50505 --folder /path/to/data
+--help       List version and arguments
+debug        Debug level, default 0
+verbose      Verbose logging, default False
+permissions  Use a permissions file to determine directory access, default False
+port         Set server port, default 3002
+threads      Set thread pool count, default 4
+folder       Set folder for data files, default current directory
 ```
 
 ## External dependencies
@@ -30,7 +36,6 @@ The server build depends on the following libraries:
 * [protobuf](https://developers.google.com/protocol-buffers) for client-side communication using specific message formats. Debian package `libprotobuf-dev` (> 3.0 required. Can use [PPA](https://launchpad.net/~maarten-fonville/+archive/ubuntu/protobuf) for earlier versions of Ubuntu) 
 * [HDF5](https://support.hdfgroup.org/HDF5/) C++ library for HDF5 support. Debian packages `libhdf5-dev` and `libhdf5-cpp-100`. By default, the serial version of the HDF5 library is targeted.
 * [µWS](https://github.com/uNetworking/uWebSockets) for socket communication with client. Build and install from git repo.
-* boost [filesystem](https://www.boost.org/doc/libs/release/libs/filesystem), [uuid](http://www.boost.org/doc/libs/release/libs/uuid) and [program_options](http://www.boost.org/doc/libs/release/libs/program_options) modules (All easily installed through `apt`)
-* Threading Building Blocks [tbb](https://www.threadingbuildingblocks.org/download) for task parallelization.
+* [tbb](https://www.threadingbuildingblocks.org/download) Threading Building Blocks for task parallelization.
 
 [![Build Status](http://acdc0.asiaa.sinica.edu.tw:47565/job/nrao-carta-backend/badge/icon)](http://acdc0.asiaa.sinica.edu.tw:47565/job/nrao-carta-backend) 
